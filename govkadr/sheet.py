@@ -26,13 +26,17 @@ def layout(spec: SheetSpec) -> list[tuple[int, int]]:
     return [(x, y) for y in ys for x in xs]
 
 
-def build(photo: np.ndarray, spec: SheetSpec) -> np.ndarray:
-    ph, pw = photo.shape[:2]
+def build(photo: np.ndarray | list[np.ndarray], spec: SheetSpec) -> np.ndarray:
+    """One photo repeated in every tile, or a list of photos placed tile by tile (left to right,
+    top to bottom); unused tiles stay white but keep their crop marks."""
+    photos = photo if isinstance(photo, list) else [photo] * (spec.cols * spec.rows)
+    ph, pw = PHOTO.height_px, PHOTO.width_px
     sheet = np.full((spec.height_px, spec.width_px, 3), 255, np.uint8)
     occupied = np.zeros(sheet.shape[:2], bool)
     tiles = layout(spec)
+    for (x, y), p in zip(tiles, photos):
+        sheet[y : y + ph, x : x + pw] = p
     for x, y in tiles:
-        sheet[y : y + ph, x : x + pw] = photo
         occupied[max(0, y - spec.mark_offset_px) : y + ph + spec.mark_offset_px, max(0, x - spec.mark_offset_px) : x + pw + spec.mark_offset_px] = True
     marks = np.zeros(sheet.shape[:2], bool)
     o, ln = spec.mark_offset_px, spec.mark_length_px

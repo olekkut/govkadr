@@ -31,7 +31,7 @@ from . import geometry as g
 from . import photometric as ph
 from .compliance import measure
 from .landmarks import CHIN, FaceAnalyzer, FaceObservation, NoFaceError, iris_centres
-from .jobs import Job, write_json
+from .jobs import Job, make_jobs, write_json
 from .spec import PHOTO, SHEET_4x6, SHEET_10x15
 
 K = 2  # supersampling of the working canvas relative to the 826x1062 output
@@ -97,9 +97,22 @@ def stage_matting(jobs: list[Job]) -> None:
             top_extra, notes = 0.0, []
             for _attempt in range(4):
                 m_roi, (w, h), _ = framing.roi_transform(obs, height, top_extra)
-                roi = g.warp(img, m_roi, (w, h))
+                # Outside the photo, pad with the wall colour: edge-replicated streaks confused the
+                # network into cutting off a jacket shoulder next to them. The silhouette is then
+                # extended geometrically into the padding so the subject's outline stays continuous.
                 cov = g.coverage(img.shape, m_roi, (w, h))
+                wall = tuple(int(v) for v in np.median(np.concatenate([img[0], img[:, 0], img[:, -1]]), axis=0))
+                roi = g.warp(img, m_roi, (w, h), border=cv2.BORDER_CONSTANT, border_value=wall)
                 alpha = model(roi)
+                if not cov.all():
+                    # Each pixel outside the photo takes the matte value of the nearest pixel inside it
+                    # (from 3 px in, past the padding seam), so a shoulder cut by the frame continues
+                    # straight out at full opacity.
+                    inner = cv2.erode(cov.astype(np.uint8), np.ones((7, 7), np.uint8)).astype(bool)
+                    _, labels = cv2.distanceTransformWithLabels((~inner).astype(np.uint8), cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
+                    lut = np.zeros(labels.max() + 1, np.float32)
+                    lut[labels[inner]] = alpha[inner]
+                    alpha = np.where(inner, alpha, lut[labels])
                 pts = g.apply(m_roi, obs.points[:, :2])
                 axis, fw = framing.face_axis_x(pts), framing.face_width(pts)
                 crown = framing.find_crown(alpha, cov, axis - 0.55 * fw, axis + 0.55 * fw, max(3, round(0.004 * h)))
@@ -244,6 +257,90 @@ def _gain_visual(gain: np.ndarray, alpha: np.ndarray) -> np.ndarray:
     return (vis * a + 0.92 * (1 - a)).astype(np.float32)
 
 
+def _subject(job: Job):
+    """Subject layer for the relighting modes: the edge-filled one when it exists."""
+    f = job.cache / "subject_filled.npz"
+    return np.load(f if f.exists() else job.cache / "subject.npz")
+
+
+def stage_fill(jobs: list[Job]) -> None:
+    """Generative edge fill (FLUX.2 [klein] inpainting) where the crop runs past the photo."""
+    from . import fill as fl
+
+    size = (PHOTO.width_px * K, PHOTO.height_px * K)
+    todo = []
+    for job in jobs:
+        if job.failed or job.done("fill") or not job.done("strict"):
+            continue
+        z = np.load(job.cache / "subject.npz")
+        fr = framing.Framing.from_dict(json.loads((job.cache / "framing.json").read_text(encoding="utf-8")))
+        mask = fl.fill_mask(z["alpha"].astype(np.float32), fl.coverage_for(job, K, size, fr.m_out), z["pts"])
+        if mask.sum() < fl.MIN_FILL_PX:
+            write_json(job.cache / "fill.json", {"applied": False, "pixels": int(mask.sum())})
+            (job.cache / "subject_filled.npz").unlink(missing_ok=True)
+            continue
+        todo.append((job, mask))
+    if not todo:
+        return
+    need = float(os.environ.get("GOVKADR_MIN_FREE_COMMIT_FLUX_GB", "9.2"))
+    for _ in range(30):
+        if resources.free_commit_gb() >= need:
+            break
+        _log(f"fill: waiting for memory headroom (free commit {resources.free_commit_gb():.2f} GB, need {need})")
+        time.sleep(10)
+    if resources.free_commit_gb() < need and os.environ.get("GOVKADR_ALLOW_LOW_MEMORY") != "1":
+        for job, mask in todo:
+            write_json(job.cache / "fill.json", {"applied": False, "pixels": int(mask.sum()), "skipped": "not enough free memory"})
+        _log("fill: skipped, not enough free memory")
+        return
+    from .flux_relight import FluxFiller
+
+    _log(f"fill: {len(todo)} photo(s) need edge fill; loading FLUX.2 [klein] inpainting ({resources.snapshot()})")
+    filler = FluxFiller()
+    for job, mask in todo:
+        try:
+            z = np.load(job.cache / "subject.npz")
+            lin, alpha, pts = z["lin"].astype(np.float32), z["alpha"].astype(np.float32), z["pts"]
+            image = imageio.to_uint8(ph.composite_on_white(ph.linear_to_srgb(np.clip(lin, 0, 1)), alpha))
+            seam = cv2.dilate(mask.astype(np.uint8), np.ones((17, 17), np.uint8))
+            # FLUX also conditions on the input image: replace the edge-replicated streaks under the
+            # mask with a smooth extrapolation, or it copies their pattern into the fill.
+            small = cv2.resize(image, None, fx=0.25, fy=0.25, interpolation=cv2.INTER_AREA)
+            small_mask = cv2.resize(seam, small.shape[1::-1], interpolation=cv2.INTER_NEAREST)
+            smooth = cv2.resize(cv2.inpaint(small, small_mask, 9, cv2.INPAINT_TELEA), image.shape[1::-1], interpolation=cv2.INTER_CUBIC)
+            image = np.where(seam[..., None] > 0, smooth, image)
+            # Search every processed photo, not just the ones selected with --only.
+            ref_job = fl.pick_reference(job, [c.load() for c in make_jobs(job.src.parent, job.cache.parent.parent)])
+            ref = np.asarray(Image.open(ref_job.path("strict-gov", "35x45mm_600dpi")).convert("RGB")) if ref_job else None
+            out, info = filler.fill(image, seam * 255, ref)
+            fill_lin = ph.srgb_to_linear(cv2.resize(out, size, interpolation=cv2.INTER_CUBIC).astype(np.float32) / 255.0)
+            lin_f = fl.blend(lin, fill_lin, mask)
+            np.savez_compressed(job.cache / "subject_filled.npz", lin=lin_f.astype(np.float16), alpha=z["alpha"], pts=pts)
+            info.update({
+                "applied": True,
+                "pixels": int(mask.sum()),
+                "area_mm2_on_print": round(float(mask.sum()) / (K * K) / (PHOTO.width_px / PHOTO.width_mm) ** 2, 1),
+                "reference_photo": ref_job.src.name if ref_job else None,
+            })
+            write_json(job.cache / "fill.json", info)
+            _log(f"fill     {job.stem}: {info['area_mm2_on_print']} mm2 generated, reference {info['reference_photo']}, {info['seconds']}s")
+        except Exception as e:  # noqa: BLE001
+            write_json(job.cache / "fill.json", {"applied": False, "error": str(e)})
+            _log(f"fill     {job.stem}: FAILED {e}")
+            raise SystemExit(3) from e
+    filler.close()
+
+
+def _fill_note(job: Job) -> tuple[str, str] | None:
+    f = job.cache / "fill.json"
+    if not f.exists():
+        return None
+    info = json.loads(f.read_text(encoding="utf-8"))
+    if not info.get("applied"):
+        return None
+    return ("edge fill (generative)", f"{info['area_mm2_on_print']} mm2 of clothing generated, ref. {info['reference_photo']}")
+
+
 def stage_virtual(jobs: list[Job], analyzer: FaceAnalyzer, preset_name: str = "clamshell") -> None:
     """virtual-studio: physically based relighting with virtual softboxes (CPU, no generative model)."""
     from . import virtual_studio as vs
@@ -254,7 +351,7 @@ def stage_virtual(jobs: list[Job], analyzer: FaceAnalyzer, preset_name: str = "c
             continue
         try:
             t0 = time.perf_counter()
-            z = np.load(job.cache / "subject.npz")
+            z = _subject(job)
             lin, alpha, pts = z["lin"].astype(np.float32), z["alpha"].astype(np.float32), z["pts"]
             th = np.load(job.cache / "thumb.npz")
             obs = _load_obs(job.cache / "face.json")
@@ -279,8 +376,8 @@ def stage_virtual(jobs: list[Job], analyzer: FaceAnalyzer, preset_name: str = "c
                 ("geometry", "MediaPipe mesh normals + inflated matte silhouette"),
                 ("old light (SH2 fit R^2)", str(infos[preset.name]["old_light_fit_r2"])),
                 ("skin gain EV p5/50/95", str(infos[preset.name]["skin_gain_ev_p5_p50_p95"])),
-                ("note", "no pixel is generated; ID suitability depends on preset"),
-            ]
+                ("note", "lighting is computed, not generated; ID suitability depends on preset"),
+            ] + ([n] if (n := _fill_note(job)) else [])
             coverage = job.report.get("strict-gov", {}).get("coverage", {})
             meas = _deliver(job, "virtual-studio", comp, alpha, analyzer, obs, fr, fj["crown_cut"], coverage, th["img"], float(th["scale"]), extra)
             imageio.save_jpeg(job.path("virtual-studio", "presets"), np.hstack(tiles), quality=90)
@@ -314,7 +411,7 @@ def stage_studio(jobs: list[Job]) -> None:
     free = resources.free_commit_gb()
     if free < need and os.environ.get("GOVKADR_ALLOW_LOW_MEMORY") != "1":
         reason = (
-            f"skipped: only {free:.1f} GB of free system commit, IC-Light needs ~{need} GB. Close memory-heavy "
+            f"skipped: only {free:.1f} GB of free system commit, IC-Light needs ~{need} GB (measured peak 8.7 GB). Close memory-heavy "
             "applications or raise the Windows page-file limit, or re-run with --allow-low-memory."
         )
         for job in todo:
@@ -327,7 +424,7 @@ def stage_studio(jobs: list[Job]) -> None:
     for job in todo:
         for attempt in range(2):
             try:
-                z = np.load(job.cache / "subject.npz")
+                z = _subject(job)
                 lin, alpha = z["lin"].astype(np.float32), z["alpha"].astype(np.float32)
                 fg = ph.linear_to_srgb(np.clip(lin, 0, 1))
                 grey = imageio.to_uint8(fg * alpha[..., None] + (127.0 / 255.0) * (1 - alpha[..., None]))
@@ -362,7 +459,7 @@ def stage_flux(jobs: list[Job]) -> None:
     if not todo:
         return
     # Measured with the streamed loader: see ARCHITECTURE.md section 2.8.
-    need = float(os.environ.get("GOVKADR_MIN_FREE_COMMIT_FLUX_GB", "10"))
+    need = float(os.environ.get("GOVKADR_MIN_FREE_COMMIT_FLUX_GB", "9.2"))
     for _ in range(30):
         if resources.free_commit_gb() >= need:
             break
@@ -371,7 +468,7 @@ def stage_flux(jobs: list[Job]) -> None:
     free = resources.free_commit_gb()
     if free < need and os.environ.get("GOVKADR_ALLOW_LOW_MEMORY") != "1":
         reason = (
-            f"skipped: only {free:.1f} GB of free system commit, FLUX.2 [klein] needs ~{need} GB. Close memory-heavy "
+            f"skipped: only {free:.1f} GB of free system commit, FLUX.2 [klein] needs ~{need} GB (measured peak 8.7 GB). Close memory-heavy "
             "applications or raise the Windows page-file limit, or re-run with --allow-low-memory."
         )
         for job in todo:
@@ -383,7 +480,7 @@ def stage_flux(jobs: list[Job]) -> None:
     _log(f"flux: loaded ({resources.snapshot()})")
     for job in todo:
         try:
-            z = np.load(job.cache / "subject.npz")
+            z = _subject(job)
             lin, alpha = z["lin"].astype(np.float32), z["alpha"].astype(np.float32)
             ref = imageio.to_uint8(ph.composite_on_white(ph.linear_to_srgb(np.clip(lin, 0, 1)), alpha))
             del z, lin, alpha
@@ -417,7 +514,7 @@ def stage_studio_finish(jobs: list[Job], analyzer: FaceAnalyzer, mode: str = "st
         try:
             t0 = time.perf_counter()
             info = json.loads((job.cache / f"{tag}.json").read_text(encoding="utf-8"))
-            z = np.load(job.cache / "subject.npz")
+            z = _subject(job)
             lin, alpha, pts = z["lin"].astype(np.float32), z["alpha"].astype(np.float32), z["pts"]
             th = np.load(job.cache / "thumb.npz")
             obs = _load_obs(job.cache / "face.json")
@@ -455,7 +552,7 @@ def stage_studio_finish(jobs: list[Job], analyzer: FaceAnalyzer, mode: str = "st
                 ("lighting field EV p5/50/95", str(info["gain_ev_p5_p50_p95"])),
                 ("chroma gain", str(info["chroma_gain_rgb"])),
                 ("note", "R&D output - generative relighting is not for official ID"),
-            ]
+            ] + ([n] if (n := _fill_note(job)) else [])
             coverage = job.report.get("strict-gov", {}).get("coverage", {})
             meas = _deliver(job, mode, comp, alpha, analyzer, obs, fr, fj["crown_cut"], coverage, th["img"], float(th["scale"]), extra)
             fg = ph.linear_to_srgb(np.clip(lin, 0, 1))

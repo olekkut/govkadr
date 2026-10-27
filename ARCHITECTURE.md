@@ -252,13 +252,40 @@ model card asks for ~13 GB of VRAM; on the 8 GB card:
 * the VAE runs in bfloat16 on the GPU.
 
 Measured with the streamed loader: 42 s to load (6.7 GB process commit), 10.6–14 s per
-768 × 992 render, 5.56 GB peak VRAM, 8.7 GB process commit at peak. The stage waits for 10 GB
-of free commit and otherwise skips itself. The render is used
+768 × 992 render, 5.56 GB peak VRAM, 8.7 GB process commit at peak. The stage waits for 9.2 GB
+of free commit (measured peak plus margin) and otherwise skips itself. The render is used
 exactly like IC-Light's (registered, skin-only, symmetrised lighting and colour field), except that
 global exposure (±0.5 EV) and local shaping (±0.75 EV) are now limited separately. FLUX renders
 about 1 EV brighter overall, and a single clamp flattened the shading into a uniform lift.
 Its raw render is far more faithful than IC-Light's: ArcFace cosine to the strict-gov photo of
 0.82–0.93 on test photos, against ~0.69. It still alters hair tone, lip colour and fabric.
+
+### 2.9 Edges outside the original photo: matting padding and generative fill
+
+When the 35×45 framing extends past the original photo's border, two things are needed:
+
+* **Matting.** The ROI used to be padded by edge replication. The striped bands this produces
+  made BiRefNet cut a jacket shoulder off along a diagonal (a white wedge in the bottom-left corner
+  of two telephoto shots). The padding is now the wall colour (median of the photo border), and the
+  matte outside the photo is continued by copying the value of the nearest pixel 3 px inside it
+  (`distanceTransformWithLabels`). A diffusion-style inpaint of the matte only reached 0.58 opacity
+  there.
+* **Fill (`fill` stage, FLUX.2 [klein] inpainting).** Mask = outside the photo ∧ inside the
+  silhouette ∧ not within ~20 px of the face oval. Strips under ~100 output px are skipped. The
+  streaks under the mask are replaced by a smooth extrapolation first, because FLUX also conditions
+  on the input image and otherwise copies their pattern. The `image_reference` is the best-framed
+  photo of the same session (no truncation, nearest capture time), so the jacket, shirt and tie
+  continue with the right fabric. The result is feather-blended into the subject layer
+  (`subject_filled.npz`) used by virtual-studio, studio-ai and studio-flux. strict-gov stays
+  unfilled and keeps its `source_coverage` warning. The generated area is reported in mm² of print.
+
+### 2.10 Print manager
+
+`govkadr gui` runs a standard-library HTTP server on 127.0.0.1 with one page. It reads the
+per-photo reports, offers every mode's photo with its verdict and identity score, and composes a
+4 × 2 sheet from any mix of photos (`sheet.build` accepts a list of tiles). It writes 600 dpi sheets
+plus a JSON manifest to `output/prints/`. File serving is restricted to images and JSON under
+`output/`, and path traversal is rejected.
 
 ## 3. Memory strategy (RTX 5060 8 GB, ~5 GB free commit)
 

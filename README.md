@@ -11,7 +11,7 @@ fully local. Four modes:
   `high-key`, `loop`). Face geometry from the 478-point mesh, no generative model, no generated pixel.
 * **`studio-ai`** (R&D): IC-Light (SD 1.5) relighting, used only as a lighting source.
 * **`studio-flux`** (R&D): FLUX.2 [klein] 4B relighting, used the same way; much more faithful
-  than IC-Light. Needs ~10 GB of free system memory.
+  than IC-Light. Needs ~9 GB of free system memory.
 
 The generative modes never keep the AI render: its lighting is registered to the real face and
 applied to the photo, then the render is deleted. Every mode gets an ArcFace identity-drift audit.
@@ -42,6 +42,28 @@ Options: `--mode all|strict-gov|virtual-studio|studio-ai|studio-flux` (default `
 `--preset clamshell|high-key|loop` (virtual-studio), `--only <name fragments>`, `--limit N`,
 `--from-stage <stage>` / `--stages <stage ...>` (re-run part of the pipeline from cache),
 `--allow-low-memory` (run generative stages even with little free memory).
+Stages: analyze, matting, strict, fill, virtual, studio, studio-finish, flux, flux-finish, identity.
+
+## Print manager (GUI)
+
+```bash
+uv run govkadr gui
+```
+
+Opens a local page (http://127.0.0.1:8765, never exposed to the network) showing every photo in every
+mode with its verdict, head height and identity score. Pick photos with **+1 to sheet** or **Fill
+sheet ×8**, mix photos and modes freely, choose 4×6 in or 150×100 mm paper, and **Create print
+sheet** writes a 600 dpi sheet with crop marks to `output/prints/` (plus a JSON list of its tiles).
+
+## Missing image edges
+
+When the 35×45 crop runs past the original photo (a shoulder cut by the frame), the cut-out
+silhouette is continued straight out. The `fill` stage then generates only that missing strip of
+clothing with FLUX.2 [klein] inpainting. It uses the best-framed shot from the same session as a
+reference, so the same jacket, shirt and tie continue, and it never touches the face. The
+virtual-studio, studio-ai and studio-flux photos use the filled version; strict-gov never does, since
+gov.pl forbids altering the photo, and keeps a `source_coverage` warning instead. Better still,
+leave room below the shoulders when shooting.
 
 ## Outputs
 

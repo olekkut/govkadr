@@ -27,9 +27,14 @@ os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 os.environ.setdefault("GLOG_minloglevel", "2")
 
-STAGES = ("analyze", "matting", "strict", "virtual", "studio", "studio-finish", "flux", "flux-finish", "identity")
+STAGES = ("analyze", "matting", "strict", "fill", "virtual", "studio", "studio-finish", "flux", "flux-finish", "identity")
 # Optional stages per mode ("all" runs everything).
-MODE_STAGES = {"strict-gov": (), "virtual-studio": ("virtual",), "studio-ai": ("studio", "studio-finish"), "studio-flux": ("flux", "flux-finish")}
+MODE_STAGES = {
+    "strict-gov": (),
+    "virtual-studio": ("fill", "virtual"),
+    "studio-ai": ("fill", "studio", "studio-finish"),
+    "studio-flux": ("fill", "flux", "flux-finish"),
+}
 
 
 def _jobs(args):
@@ -56,6 +61,8 @@ def _stage(args: argparse.Namespace) -> int:
         pipeline.stage_matting(jobs)
     elif name == "strict":
         pipeline.stage_strict(jobs, analyzer)
+    elif name == "fill":
+        pipeline.stage_fill(jobs)
     elif name == "virtual":
         pipeline.stage_virtual(jobs, analyzer, os.environ.get("GOVKADR_VIRTUAL_PRESET", "clamshell"))
     elif name == "studio":
@@ -152,6 +159,11 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("_stage", help=argparse.SUPPRESS)
     s.add_argument("name", choices=STAGES)
     common(s)
+    gp = sub.add_parser("gui", help="open the print manager: pick photos for a kiosk sheet")
+    gp.add_argument("--input", type=Path, default=Path("photos-from-camera"))
+    gp.add_argument("--output", type=Path, default=Path("output"))
+    gp.add_argument("--port", type=int, default=8765)
+    gp.add_argument("--no-browser", action="store_true")
     f = sub.add_parser("fetch-models", help="download and verify all model weights")
     f.add_argument("--no-generative", action="store_true", help="skip the ~2 GB IC-Light / SD1.5 weights")
     f.add_argument("--flux", action="store_true", help="also fetch FLUX.2 [klein] 4B (~16 GB) for studio-flux")
@@ -160,6 +172,11 @@ def main(argv: list[str] | None = None) -> int:
         from .weights import fetch_all
 
         fetch_all(include_generative=not args.no_generative, include_flux=args.flux)
+        return 0
+    if args.cmd == "gui":
+        from .gui import serve
+
+        serve(args.input, args.output, args.port, not args.no_browser)
         return 0
     if args.cmd == "_stage":
         return _stage(args)
