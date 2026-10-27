@@ -270,8 +270,12 @@ When the 35×45 framing extends past the original photo's border, two things are
   matte outside the photo is continued by copying the value of the nearest pixel 3 px inside it
   (`distanceTransformWithLabels`). A diffusion-style inpaint of the matte only reached 0.58 opacity
   there.
-* **Fill (`fill` stage, FLUX.2 [klein] inpainting).** Mask = outside the photo ∧ inside the
-  silhouette ∧ not within ~20 px of the face oval. Strips under ~100 output px are skipped. The
+* **Fill (`fill` stage, FLUX.2 [klein] inpainting).** Mask = outside the photo ∧ within 40 px of
+  the extended silhouette ∧ not within ~20 px of the face oval. The matte of the generated strip
+  is then read from the render itself: anything clearly darker than the requested white
+  background is subject. The nearest-pixel extension had smeared a sloping shoulder edge into a
+  grey band. The prompt names no garment; a first version said "suit jacket, shirt, tie" and
+  painted a collar and tie onto a T-shirt. Strips under ~100 output px are skipped. The
   streaks under the mask are replaced by a smooth extrapolation first, because FLUX also conditions
   on the input image and otherwise copies their pattern. The `image_reference` is the best-framed
   photo of the same session (no truncation, nearest capture time), so the jacket, shirt and tie

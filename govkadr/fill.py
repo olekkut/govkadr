@@ -19,8 +19,13 @@ MIN_FILL_PX = 400  # at working resolution (~100 output pixels); smaller gaps ar
 
 
 def fill_mask(alpha: np.ndarray, coverage: np.ndarray, pts: np.ndarray) -> np.ndarray:
-    """Pixels to generate: outside the photo, inside the silhouette, away from the face."""
-    mask = (~coverage) & (alpha > 0.02)
+    """Pixels to generate: outside the photo, near the (extended) silhouette, away from the face.
+
+    The band reaches 40 px beyond the extended silhouette so the generator, not the crude
+    extension, decides where a sloping shoulder ends (see ``alpha_from_fill``).
+    """
+    near = cv2.dilate((alpha > 0.02).astype(np.uint8), np.ones((81, 81), np.uint8)).astype(bool)
+    mask = (~coverage) & near
     face = np.zeros(alpha.shape, np.uint8)
     cv2.fillPoly(face, [np.round(pts[list(FACE_OVAL)]).astype(np.int32)], 1)
     face = cv2.dilate(face, np.ones((41, 41), np.uint8)).astype(bool)
@@ -51,3 +56,18 @@ def blend(lin: np.ndarray, fill_lin: np.ndarray, mask: np.ndarray, feather_px: i
 def coverage_for(job, k: int, size: tuple[int, int], m_out: np.ndarray) -> np.ndarray:
     src = job.report["source"]
     return g.coverage((src["height"], src["width"]), g.resample_scale(k) @ m_out, size)
+
+
+def alpha_from_fill(fill_srgb: np.ndarray, alpha: np.ndarray, mask: np.ndarray, feather_px: int = 6) -> np.ndarray:
+    """Matte of the generated strip, read from the render itself.
+
+    The generator was asked for a plain white background, so anything clearly darker than white
+    is subject. Near-white clothing is classed as background, but it composites to the same white.
+    Replaces the nearest-pixel extension, which smeared a sloping shoulder edge into a grey band.
+    """
+    d = (1.0 - fill_srgb.min(axis=2)).astype(np.float32)
+    a_fill = np.clip((d - 0.04) / 0.12, 0.0, 1.0)
+    a_fill = cv2.GaussianBlur(a_fill, (0, 0), 1.0)
+    w = cv2.GaussianBlur(mask.astype(np.float32), (0, 0), feather_px)
+    w = np.where(mask, 1.0, w)  # fully generated inside the mask, feathered just outside it
+    return (alpha * (1 - w) + a_fill * w).astype(np.float32)

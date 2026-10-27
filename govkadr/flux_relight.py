@@ -31,10 +31,12 @@ PROMPT = (
 )
 
 
+# Deliberately names no garment: an earlier prompt mentioning "suit jacket, shirt, tie" made FLUX
+# paint a collar and tie onto a T-shirt.
 FILL_PROMPT = (
-    "Complete the missing edge of this portrait photo: continue the same suit jacket, shirt, tie and "
-    "shoulders exactly as in the reference photo of the same person, same fabric, colour and lighting, "
-    "plain white background."
+    "Seamlessly complete the missing edge of this photo by continuing exactly what is already there: the "
+    "same clothing, fabric, colour, folds and lighting as in the photo and in the reference photo of the "
+    "same person. Do not add any new clothing, accessories or objects. Plain white background."
 )
 
 

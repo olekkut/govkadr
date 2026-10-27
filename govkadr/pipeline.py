@@ -112,7 +112,11 @@ def stage_matting(jobs: list[Job]) -> None:
                     _, labels = cv2.distanceTransformWithLabels((~inner).astype(np.uint8), cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
                     lut = np.zeros(labels.max() + 1, np.float32)
                     lut[labels[inner]] = alpha[inner]
-                    alpha = np.where(inner, alpha, lut[labels])
+                    # Only the body continues past the frame: above the eye line the head ends, so
+                    # hair touching the photo's top edge must not be stretched up into the margin.
+                    eye_row = g.apply(m_roi, 0.5 * np.add(*iris_centres(obs.points)))[1]
+                    below = np.arange(h)[:, None] > eye_row
+                    alpha = np.where(inner | ~below, alpha, lut[labels])
                 pts = g.apply(m_roi, obs.points[:, :2])
                 axis, fw = framing.face_axis_x(pts), framing.face_width(pts)
                 crown = framing.find_crown(alpha, cov, axis - 0.55 * fw, axis + 0.55 * fw, max(3, round(0.004 * h)))
@@ -315,7 +319,8 @@ def stage_fill(jobs: list[Job]) -> None:
             out, info = filler.fill(image, seam * 255, ref)
             fill_lin = ph.srgb_to_linear(cv2.resize(out, size, interpolation=cv2.INTER_CUBIC).astype(np.float32) / 255.0)
             lin_f = fl.blend(lin, fill_lin, mask)
-            np.savez_compressed(job.cache / "subject_filled.npz", lin=lin_f.astype(np.float16), alpha=z["alpha"], pts=pts)
+            alpha_f = fl.alpha_from_fill(ph.linear_to_srgb(fill_lin), alpha, mask)
+            np.savez_compressed(job.cache / "subject_filled.npz", lin=lin_f.astype(np.float16), alpha=alpha_f.astype(np.float16), pts=pts)
             info.update({
                 "applied": True,
                 "pixels": int(mask.sum()),
