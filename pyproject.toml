@@ -1,0 +1,45 @@
+[project]
+name = "govkadr"
+version = "0.1.0"
+description = "Biometric 35x45 mm ID/passport photo pipeline (gov.pl + ICAO 9303) with a deterministic and an experimental generative mode"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "numpy>=2.0",
+    "scipy>=1.14",
+    "pillow>=11.0",
+    "opencv-contrib-python>=4.10",
+    "mediapipe>=0.10.20",
+    "onnxruntime>=1.20",
+    "pymatting>=1.1.13",
+    "torch>=2.9",
+    "torchvision>=0.24",
+    # BiRefNet ships as Hugging Face remote code written against the 4.x API.
+    "transformers>=4.46,<5",
+    "timm>=1.0",
+    "kornia>=0.7",
+    "einops>=0.8",
+    "diffusers>=0.32",
+    "accelerate>=1.0",
+    "safetensors>=0.4",
+    "huggingface-hub>=0.26",
+]
+
+[project.scripts]
+govkadr = "govkadr.cli:main"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
+torchvision = { index = "pytorch-cu130" }
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["govkadr"]

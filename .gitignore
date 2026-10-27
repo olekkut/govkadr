@@ -1,0 +1,8 @@
+.venv/
+models/
+output/
+__pycache__/
+*.pyc
+
+# Personal source photos (biometric data) - never commit
+photos-from-camera/
