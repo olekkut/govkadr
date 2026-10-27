@@ -49,8 +49,7 @@ output/
       <photo>_strict-gov_diagnostic.jpg       annotated mesh / axes / compliance zone + checklist
     studio-ai/
       ... same set, plus
-      <photo>_studio-ai_comparison.jpg        strict-gov | studio-ai | raw generative | lighting field
-      <photo>_studio-ai_generative_raw.jpg    what the diffusion model drew on its own (audit only)
+      <photo>_studio-ai_comparison.jpg        strict-gov | studio-ai | lighting field applied
 ```
 
 **Printing:** most "10 × 15" kiosks use 4 × 6 in paper. Print `sheet_4x6in` there (or `sheet_10x15cm`

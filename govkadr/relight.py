@@ -10,7 +10,7 @@ ArcFace cosine ~0.65 to the photo), so its render is used only as a *lighting or
             -> symmetrised about the facial axis, clamped to +-0.75 EV, + half the colour shift
     studio = photo * field
 
-Every edge and pore in the result is the camera's; the raw render is kept for the drift audit.
+Every edge and pore in the result is the camera's; the render itself is discarded after use.
 
 Memory plan (Windows backs VRAM with system commit): weights stream from a read-only memory map
 straight to the GPU, the UNet is stored in float8 and computed in fp16, CFG runs as two batch-1

@@ -16,7 +16,7 @@ STAGE_ARTIFACTS = {
     "analyze": ("face.json", "report.analysis.json"),
     "matting": ("matte.npz", "framing.json", "report.matting.json"),
     "strict": ("subject.npz", "thumb.npz", "report.strict-gov.json"),
-    "studio": ("render.png", "render.json"),
+    "studio": ("render.json",),  # render.png is transient: deleted once studio-finish used it
     "studio-finish": ("report.studio-ai.json",),
     "identity": ("report.identity.json",),
 }
@@ -24,7 +24,7 @@ STAGE_ARTIFACTS = {
 STAGE_EXTRAS = {
     "analyze": ("report.source.json",),
     "matting": ("report.framing.json",),
-    "studio": ("render_error.txt",),
+    "studio": ("render_error.txt", "render.png"),
 }
 
 

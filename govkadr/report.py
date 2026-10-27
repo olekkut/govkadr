@@ -34,7 +34,6 @@ def _row(job: Job) -> dict:
         "studio_ai_verdict": b.get("verdict"),
         "cos_source_strict": ident.get("cosine_source_vs_strict_gov"),
         "cos_source_studio": ident.get("cosine_source_vs_studio_ai"),
-        "cos_source_generative_raw": ident.get("cosine_source_vs_studio_ai_generative_raw"),
         "strict_gov_non_pass_checks": warns,
         "error": job.failed,
     }
@@ -58,15 +57,15 @@ def write_reports(jobs: list[Job], out_dir: Path, baseline: dict, run_info: dict
         f"Identity baseline (ArcFace cosine between different raw shots of the same person): median {baseline.get('median')}, "
         f"min {baseline.get('min')}, max {baseline.get('max')} over {baseline.get('pairs')} pairs.",
         "",
-        "| Photo | f(35mm) | Rotation | strict-gov | Head mm | Top mm | Offset mm | Roll res. | BG #FFF % | cos A | studio-ai | cos B | cos raw gen. | Non-PASS checks (A) |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| Photo | f(35mm) | Rotation | strict-gov | Head mm | Top mm | Offset mm | Roll res. | BG #FFF % | cos A | studio-ai | cos B | Non-PASS checks (A) |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
         lines.append(
             f"| {r['photo']} | {f(r['camera_focal_35mm'])} | {f(r['rotation_applied_deg_ccw'], '{:+.2f}°')} | {f(r['strict_gov_verdict'])} | "
             f"{f(r['head_height_mm'], '{:.2f}')} | {f(r['top_margin_mm'], '{:.2f}')} | {f(r['horizontal_offset_mm'], '{:+.2f}')} | "
             f"{f(r['roll_residual_deg'], '{:+.3f}°')} | {f(r['background_white_pct'], '{:.2f}')} | {f(r['cos_source_strict'], '{:.3f}')} | "
-            f"{f(r['studio_ai_verdict'])} | {f(r['cos_source_studio'], '{:.3f}')} | {f(r['cos_source_generative_raw'], '{:.3f}')} | "
+            f"{f(r['studio_ai_verdict'])} | {f(r['cos_source_studio'], '{:.3f}')} | "
             f"{', '.join(r['strict_gov_non_pass_checks']) or '-'}{' ERROR: ' + r['error'] if r['error'] else ''} |"
         )
     (out_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -91,8 +90,8 @@ def _write_gallery(jobs: list[Job], rows: list[dict], out_dir: Path, baseline: d
         cards.append(
             f'<section><h2>{html.escape(r["photo"])}</h2><p>strict-gov {badge(r["strict_gov_verdict"])} studio-ai {badge(r["studio_ai_verdict"])} '
             f'head {r["head_height_mm"]} mm · offset {r["horizontal_offset_mm"]} mm · rotation {r["rotation_applied_deg_ccw"]}° · '
-            f'cos(src,A) {r["cos_source_strict"]} · cos(src,B) {r["cos_source_studio"]} · cos(src,raw) {r["cos_source_generative_raw"]}</p>'
-            f'<div class="row">{img(a.get("photo"), "strict-gov")}{img(b.get("photo"), "studio-ai")}{img(b.get("generative_raw"), "raw generative (diagnostic)")}</div>'
+            f'cos(src,A) {r["cos_source_strict"]} · cos(src,B) {r["cos_source_studio"]}</p>'
+            f'<div class="row">{img(a.get("photo"), "strict-gov")}{img(b.get("photo"), "studio-ai")}</div>'
             f"<p class=links>{links}</p></section>"
         )
     page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">

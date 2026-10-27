@@ -166,9 +166,10 @@ by a prompt and an initial light-map latent.
 **Measured behaviour.** On its own IC-Light re-draws the face (slimmer jaw, different iris colour,
 moles removed). In one test it turned a red tie black: colour words in the negative prompt
 ("oversaturated", "colour cast") steer classifier-free guidance towards desaturation, so the
-negative prompt is IC-Light's own default. The raw render scores **ArcFace cosine 0.63–0.70**
-against the photo, *below* the 0.75–0.90 measured between different real shots of the same person.
-It is therefore used only as a *lighting* oracle:
+negative prompt is IC-Light's own default. During development the unmodified render scored
+**ArcFace cosine 0.61–0.76** against the photo, *below* every pair of real shots of the same
+person. It is therefore used only as a *lighting* oracle, held in memory and in a temporary cache
+file that is deleted as soon as studio-finish has used it. The render is never saved or shown:
 
 1. **Render** at 512 × 656 (fp8 weights, 25 DPM++ 2M SDE Karras steps, CFG 2.0, fixed seed).
 2. **Register** the render onto the photo: the mesh is re-detected on the render and a thin-plate
@@ -189,7 +190,7 @@ It is therefore used only as a *lighting* oracle:
    recoloured, because the field is measured on median-filtered skin only.
 6. Multiply the strict-gov foreground by these fields, so every edge and pore is still the camera's.
 
-The raw render, the field (as a diverging map) and the before/after are saved side by side in
+The before/after and the applied lighting field (as a diverging map) are saved side by side in
 `*_studio-ai_comparison.jpg`.
 
 ### 2.6 identity — biometric drift audit
@@ -199,9 +200,8 @@ The raw render, the field (as a diverging map) and the before/after are saved si
   aligned to the canonical 112 × 112 ArcFace template with a least-squares similarity
   (Umeyama), as the reference implementation does. Note: the buffalo_l weights are licensed for
   non-commercial research use.
-* Reported per photo: cosine(source, strict-gov), cosine(source, studio-ai), cosine(source, raw
-  generative render), cosine(strict-gov, studio-ai), and the closest *other real shot* of the
-  same person.
+* Reported per photo: cosine(source, strict-gov), cosine(source, studio-ai),
+  cosine(strict-gov, studio-ai), and the closest *other real shot* of the same person.
 * **Calibration baseline:** the pairwise cosine between *different raw photos* of the same person
   in the batch (natural shot-to-shot variation). A drift is reported as smaller or larger than the
   median of that distribution, which is a more meaningful yardstick than an absolute threshold.
@@ -283,13 +283,13 @@ Re-measured on the delivered files (`output/summary.md` has the per-photo table)
 | file size | 158–260 KB, 600 dpi JFIF + EXIF, sRGB |
 | ArcFace cos(source, strict-gov) | **0.988** ± 0.003 (min 0.981) |
 | ArcFace cos(source, studio-ai) | **0.897** ± 0.012 (0.869–0.917) |
-| ArcFace cos(source, raw IC-Light render) | **0.689** ± 0.037 (0.610–0.760) |
+| ArcFace cos(source, unmodified IC-Light render; development measurement, no longer kept) | 0.689 ± 0.037 (0.610–0.760) |
 | shot-to-shot baseline (496 pairs of different real photos) | median 0.830, min 0.714, max 0.983 |
 
 Reading the audit: strict-gov is effectively identity-neutral. studio-ai drifts less than two real
-photos of the same person usually differ (0.897 > median 0.830). The raw generative render drifts
+photos of the same person usually differ (0.897 > median 0.830). The unmodified generative render drifted
 *more* than any pair of real photos (0.689 < min 0.714), which is why it is used only as a
-lighting oracle.
+lighting oracle and then discarded.
 
 Timing (reference run, all 32 photos): analyze ~1.5 s, matting ~0.4 s (after a ~25 s model load),
 strict ~7 s, IC-Light ~7 s, studio-finish ~4 s, identity ~3 s per photo; ~21 min end to end,

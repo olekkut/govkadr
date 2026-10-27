@@ -315,7 +315,7 @@ def stage_studio_finish(jobs: list[Job], analyzer: FaceAnalyzer) -> None:
             job.save("studio-ai", {"verdict": "SKIPPED", "error": reason})
             continue
         if not (job.cache / "render.png").exists():
-            err = job.cache / "render_error.txt"
+            err = job.cache / "render_error.txt"  # the render is deleted after use: re-run the studio stage
             job.save("studio-ai", {"verdict": "ERROR", "error": err.read_text(encoding="utf-8") if err.exists() else "no IC-Light render"})
             continue
         try:
@@ -344,7 +344,6 @@ def stage_studio_finish(jobs: list[Job], analyzer: FaceAnalyzer) -> None:
             studio_lin, gain, tinfo = transfer_lighting(lin, ph.srgb_to_linear(aligned), masks.skin, masks.face_w, framing.face_axis_x(pts))
             info.update(tinfo)
             comp = ph.composite_on_white(ph.linear_to_srgb(np.clip(studio_lin, 0, 1)), alpha)
-            imageio.save_jpeg(job.path("studio-ai", "generative_raw"), imageio.to_uint8(_downsample(render_work)), quality=92)
             lum_ev = np.log2(np.maximum(ph.luminance(gain), 1e-3))[alpha > 0.98]
             info["gain_ev_p5_p50_p95"] = [round(float(v), 3) for v in np.percentile(lum_ev, [5, 50, 95])]
             extra = [
@@ -361,15 +360,15 @@ def stage_studio_finish(jobs: list[Job], analyzer: FaceAnalyzer) -> None:
             strip = np.hstack([
                 _downsample(ph.composite_on_white(fg, alpha)),
                 _downsample(comp),
-                _downsample(render_work),
                 _downsample(_gain_visual(gain, alpha)),
             ])
             imageio.save_jpeg(job.path("studio-ai", "comparison"), strip, quality=90)
             meas["relight"] = info
-            meas["files"]["generative_raw"] = str(job.path("studio-ai", "generative_raw"))
             meas["files"]["comparison"] = str(job.path("studio-ai", "comparison"))
             meas["seconds"] = round(time.perf_counter() - t0, 1)
             job.save("studio-ai", meas)
+            # The diffusion render is only a lighting source; never keep it as an image.
+            (job.cache / "render.png").unlink(missing_ok=True)
             _log(f"studio+  {job.stem}: {meas['verdict']}, lighting EV p5/50/95 {info['gain_ev_p5_p50_p95']}, chroma {info['chroma_gain_rgb']}")
         except Exception as e:  # noqa: BLE001
             job.save("studio-ai", {"verdict": "ERROR", "error": str(e)})
@@ -392,7 +391,7 @@ def stage_identity(jobs: list[Job]) -> dict:
             continue
         src_emb[job.stem] = e_src
         res = {"model": "InsightFace buffalo_l: SCRFD-10GF + ArcFace R50 (WebFace600K)", "source_detection": info_src}
-        for key, mode, kind in (("strict_gov", "strict-gov", "35x45mm_600dpi"), ("studio_ai", "studio-ai", "35x45mm_600dpi"), ("studio_ai_generative_raw", "studio-ai", "generative_raw")):
+        for key, mode, kind in (("strict_gov", "strict-gov", "35x45mm_600dpi"), ("studio_ai", "studio-ai", "35x45mm_600dpi")):
             p = job.path(mode, kind)
             if p.exists():
                 e, _ = fi.embed(np.asarray(Image.open(p).convert("RGB")))
