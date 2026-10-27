@@ -68,6 +68,15 @@ SD15_REALISTIC_VISION = HfAsset(
 )
 
 
+# FLUX.2 [klein] 4B (Apache-2.0): 4B rectified-flow transformer + Qwen3-4B text encoder, with
+# reference-image editing. The single-file checkpoint duplicates transformer/ and is skipped.
+FLUX2_KLEIN_4B = HfAsset(
+    "black-forest-labs/FLUX.2-klein-4B",
+    "e7b7dc27f91deacad38e78976d1f2b499d76a294",
+    ("model_index.json", "scheduler/*", "tokenizer/*", "text_encoder/*", "transformer/*", "vae/*"),
+)
+
+
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -157,10 +166,12 @@ def read_safetensors(path: Path):
     del mm
 
 
-def fetch_all(include_generative: bool = True) -> None:
+def fetch_all(include_generative: bool = True, include_flux: bool = False) -> None:
     fetch_url(FACE_LANDMARKER)
     fetch_url(INSIGHTFACE_BUFFALO_L)
-    fetch_hf(BIREFNET_HR_MATTING)
+    fetch_hf(BIREFNET_DYNAMIC_MATTING)
     if include_generative:
         fetch_hf(IC_LIGHT)
         fetch_hf(SD15_REALISTIC_VISION)
+    if include_flux:
+        fetch_hf(FLUX2_KLEIN_4B)

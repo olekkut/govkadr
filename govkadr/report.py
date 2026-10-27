@@ -32,6 +32,10 @@ def _row(job: Job) -> dict:
         "background_white_pct": round(100 * am.get("background", {}).get("pure_white_fraction", 0), 3) if am else None,
         "file_kb": round(a.get("file", {}).get("file_bytes", 0) / 1024) if a else None,
         "studio_ai_verdict": b.get("verdict"),
+        "virtual_studio_verdict": r.get("virtual-studio", {}).get("verdict"),
+        "cos_source_virtual": ident.get("cosine_source_vs_virtual_studio"),
+        "studio_flux_verdict": r.get("studio-flux", {}).get("verdict"),
+        "cos_source_flux": ident.get("cosine_source_vs_studio_flux"),
         "cos_source_strict": ident.get("cosine_source_vs_strict_gov"),
         "cos_source_studio": ident.get("cosine_source_vs_studio_ai"),
         "strict_gov_non_pass_checks": warns,
@@ -57,15 +61,15 @@ def write_reports(jobs: list[Job], out_dir: Path, baseline: dict, run_info: dict
         f"Identity baseline (ArcFace cosine between different raw shots of the same person): median {baseline.get('median')}, "
         f"min {baseline.get('min')}, max {baseline.get('max')} over {baseline.get('pairs')} pairs.",
         "",
-        "| Photo | f(35mm) | Rotation | strict-gov | Head mm | Top mm | Offset mm | Roll res. | BG #FFF % | cos A | studio-ai | cos B | Non-PASS checks (A) |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| Photo | f(35mm) | Rotation | strict-gov | Head mm | Top mm | Offset mm | Roll res. | BG #FFF % | cos A | studio-ai | cos B | virtual-studio | cos V | studio-flux | cos F | Non-PASS checks (A) |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
         lines.append(
             f"| {r['photo']} | {f(r['camera_focal_35mm'])} | {f(r['rotation_applied_deg_ccw'], '{:+.2f}°')} | {f(r['strict_gov_verdict'])} | "
             f"{f(r['head_height_mm'], '{:.2f}')} | {f(r['top_margin_mm'], '{:.2f}')} | {f(r['horizontal_offset_mm'], '{:+.2f}')} | "
             f"{f(r['roll_residual_deg'], '{:+.3f}°')} | {f(r['background_white_pct'], '{:.2f}')} | {f(r['cos_source_strict'], '{:.3f}')} | "
-            f"{f(r['studio_ai_verdict'])} | {f(r['cos_source_studio'], '{:.3f}')} | "
+            f"{f(r['studio_ai_verdict'])} | {f(r['cos_source_studio'], '{:.3f}')} | {f(r['virtual_studio_verdict'])} | {f(r['cos_source_virtual'], '{:.3f}')} | {f(r['studio_flux_verdict'])} | {f(r['cos_source_flux'], '{:.3f}')} | "
             f"{', '.join(r['strict_gov_non_pass_checks']) or '-'}{' ERROR: ' + r['error'] if r['error'] else ''} |"
         )
     (out_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -91,7 +95,7 @@ def _write_gallery(jobs: list[Job], rows: list[dict], out_dir: Path, baseline: d
             f'<section><h2>{html.escape(r["photo"])}</h2><p>strict-gov {badge(r["strict_gov_verdict"])} studio-ai {badge(r["studio_ai_verdict"])} '
             f'head {r["head_height_mm"]} mm · offset {r["horizontal_offset_mm"]} mm · rotation {r["rotation_applied_deg_ccw"]}° · '
             f'cos(src,A) {r["cos_source_strict"]} · cos(src,B) {r["cos_source_studio"]}</p>'
-            f'<div class="row">{img(a.get("photo"), "strict-gov")}{img(b.get("photo"), "studio-ai")}</div>'
+            f'<div class="row">{img(a.get("photo"), "strict-gov")}{img(job.report.get("virtual-studio", {}).get("files", {}).get("photo"), "virtual-studio")}{img(b.get("photo"), "studio-ai")}{img(job.report.get("studio-flux", {}).get("files", {}).get("photo"), "studio-flux")}</div>'
             f"<p class=links>{links}</p></section>"
         )
     page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">

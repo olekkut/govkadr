@@ -244,6 +244,56 @@ def _gain_visual(gain: np.ndarray, alpha: np.ndarray) -> np.ndarray:
     return (vis * a + 0.92 * (1 - a)).astype(np.float32)
 
 
+def stage_virtual(jobs: list[Job], analyzer: FaceAnalyzer, preset_name: str = "clamshell") -> None:
+    """virtual-studio: physically based relighting with virtual softboxes (CPU, no generative model)."""
+    from . import virtual_studio as vs
+
+    preset = vs.PRESETS[preset_name]
+    for job in jobs:
+        if job.failed or job.done("virtual") or not job.done("strict"):
+            continue
+        try:
+            t0 = time.perf_counter()
+            z = np.load(job.cache / "subject.npz")
+            lin, alpha, pts = z["lin"].astype(np.float32), z["alpha"].astype(np.float32), z["pts"]
+            th = np.load(job.cache / "thumb.npz")
+            obs = _load_obs(job.cache / "face.json")
+            fj = json.loads((job.cache / "framing.json").read_text(encoding="utf-8"))
+            fr = framing.Framing.from_dict(fj)
+            pts3 = np.column_stack([pts, obs.points[:, 2] * fr.scale * K])  # mesh depth in working px
+            masks = ph.face_masks(pts, alpha, lin)
+            geo = vs.build_geometry(lin, alpha, pts3, masks.skin, masks.face_w)
+            tiles, infos, chosen = [_downsample(ph.composite_on_white(ph.linear_to_srgb(np.clip(lin, 0, 1)), alpha))], {}, None
+            for p in vs.PRESETS.values():
+                out_lin, gain, info = vs.relight(lin, alpha, geo, p)
+                comp = ph.composite_on_white(ph.linear_to_srgb(np.clip(out_lin, 0, 1)), alpha)
+                tiles.append(_downsample(comp))
+                infos[p.name] = info
+                if p.name == preset.name:
+                    chosen = (comp, gain)
+            a_small = cv2.resize(alpha, geo.normals.shape[1::-1], interpolation=cv2.INTER_AREA)
+            tiles.append(_downsample(cv2.resize(vs.normals_visual(geo.normals, a_small), alpha.shape[::-1], interpolation=cv2.INTER_LINEAR)))
+            comp, gain = chosen
+            extra = [
+                ("preset", f"{preset.name}: {preset.description}"),
+                ("geometry", "MediaPipe mesh normals + inflated matte silhouette"),
+                ("old light (SH2 fit R^2)", str(infos[preset.name]["old_light_fit_r2"])),
+                ("skin gain EV p5/50/95", str(infos[preset.name]["skin_gain_ev_p5_p50_p95"])),
+                ("note", "no pixel is generated; ID suitability depends on preset"),
+            ]
+            coverage = job.report.get("strict-gov", {}).get("coverage", {})
+            meas = _deliver(job, "virtual-studio", comp, alpha, analyzer, obs, fr, fj["crown_cut"], coverage, th["img"], float(th["scale"]), extra)
+            imageio.save_jpeg(job.path("virtual-studio", "presets"), np.hstack(tiles), quality=90)
+            meas["relight"] = {"preset": preset.name, "presets": infos}
+            meas["files"]["presets"] = str(job.path("virtual-studio", "presets"))
+            meas["seconds"] = round(time.perf_counter() - t0, 1)
+            job.save("virtual-studio", meas)
+            _log(f"virtual  {job.stem}: {meas['verdict']}, {preset.name} skin EV {infos[preset.name]['skin_gain_ev_p5_p50_p95']}, SH R2 {infos[preset.name]['old_light_fit_r2']}")
+        except Exception as e:  # noqa: BLE001
+            job.save("virtual-studio", {"verdict": "ERROR", "error": str(e)})
+            _log(f"virtual  {job.stem}: FAILED {e}" + chr(10) + traceback.format_exc())
+
+
 def stage_studio(jobs: list[Job]) -> None:
     """GPU half of studio-ai: IC-Light renders only (registration and QC run in another process)."""
     from .relight import StudioRelighter
@@ -304,30 +354,81 @@ def stage_studio(jobs: list[Job]) -> None:
     relighter.close()
 
 
-def stage_studio_finish(jobs: list[Job], analyzer: FaceAnalyzer) -> None:
-    """CPU half of studio-ai: register the render to the photo, transfer lighting, deliver, QC."""
+def stage_flux(jobs: list[Job]) -> None:
+    """GPU half of studio-flux: FLUX.2 [klein] renders only."""
+    from .flux_relight import FluxRelighter
+
+    todo = [j for j in jobs if not j.failed and j.done("strict") and not j.done("flux")]
+    if not todo:
+        return
+    # Measured with the streamed loader: see ARCHITECTURE.md section 2.8.
+    need = float(os.environ.get("GOVKADR_MIN_FREE_COMMIT_FLUX_GB", "10"))
+    for _ in range(30):
+        if resources.free_commit_gb() >= need:
+            break
+        _log(f"flux: waiting for memory headroom (free commit {resources.free_commit_gb():.2f} GB, need {need})")
+        time.sleep(10)
+    free = resources.free_commit_gb()
+    if free < need and os.environ.get("GOVKADR_ALLOW_LOW_MEMORY") != "1":
+        reason = (
+            f"skipped: only {free:.1f} GB of free system commit, FLUX.2 [klein] needs ~{need} GB. Close memory-heavy "
+            "applications or raise the Windows page-file limit, or re-run with --allow-low-memory."
+        )
+        for job in todo:
+            (job.cache / "flux_error.txt").write_text(reason, encoding="utf-8")
+        _log(f"flux: {reason}")
+        return
+    _log(f"flux: loading FLUX.2 [klein] 4B ({resources.snapshot()})")
+    relighter = FluxRelighter()
+    _log(f"flux: loaded ({resources.snapshot()})")
+    for job in todo:
+        try:
+            z = np.load(job.cache / "subject.npz")
+            lin, alpha = z["lin"].astype(np.float32), z["alpha"].astype(np.float32)
+            ref = imageio.to_uint8(ph.composite_on_white(ph.linear_to_srgb(np.clip(lin, 0, 1)), alpha))
+            del z, lin, alpha
+            render, info = relighter.relight(ref)
+            cv2.imwrite(str(job.cache / "flux.png"), cv2.cvtColor(render, cv2.COLOR_RGB2BGR))
+            write_json(job.cache / "flux.json", info)
+            _log(f"flux     {job.stem}: rendered in {info['seconds']}s, peak VRAM {info['peak_vram_gb']} GB")
+        except Exception as e:  # noqa: BLE001
+            (job.cache / "flux_error.txt").write_text(str(e), encoding="utf-8")
+            _log(f"flux     {job.stem}: FAILED {e}")
+            raise SystemExit(3) from e  # CUDA errors are sticky: let the parent restart the process
+    relighter.close()
+
+
+def stage_studio_finish(jobs: list[Job], analyzer: FaceAnalyzer, mode: str = "studio-ai", tag: str = "render", stage: str = "studio-finish") -> None:
+    """CPU half of a generative mode: register the render to the photo, transfer lighting, deliver, QC."""
+    from .identity import FaceIdentity, cosine
     from .relight import register_render, transfer_lighting
 
+    ident = None
     for job in jobs:
-        if job.failed or job.done("studio-finish") or not job.done("strict"):
+        if job.failed or job.done(stage) or not job.done("strict"):
             continue
-        if reason := job.skipped_studio():
-            job.save("studio-ai", {"verdict": "SKIPPED", "error": reason})
+        if reason := job.skipped_studio(tag):
+            job.save(mode, {"verdict": "SKIPPED", "error": reason})
             continue
-        if not (job.cache / "render.png").exists():
-            err = job.cache / "render_error.txt"  # the render is deleted after use: re-run the studio stage
-            job.save("studio-ai", {"verdict": "ERROR", "error": err.read_text(encoding="utf-8") if err.exists() else "no IC-Light render"})
+        if not (job.cache / f"{tag}.png").exists():
+            err = job.cache / f"{tag}_error.txt"  # the render is deleted after use: re-run its GPU stage
+            job.save(mode, {"verdict": "ERROR", "error": err.read_text(encoding="utf-8") if err.exists() else "no generative render"})
             continue
         try:
             t0 = time.perf_counter()
-            info = json.loads((job.cache / "render.json").read_text(encoding="utf-8"))
+            info = json.loads((job.cache / f"{tag}.json").read_text(encoding="utf-8"))
             z = np.load(job.cache / "subject.npz")
             lin, alpha, pts = z["lin"].astype(np.float32), z["alpha"].astype(np.float32), z["pts"]
             th = np.load(job.cache / "thumb.npz")
             obs = _load_obs(job.cache / "face.json")
             fj = json.loads((job.cache / "framing.json").read_text(encoding="utf-8"))
             fr = framing.Framing.from_dict(fj)
-            render = cv2.cvtColor(cv2.imread(str(job.cache / "render.png")), cv2.COLOR_BGR2RGB)
+            render = cv2.cvtColor(cv2.imread(str(job.cache / f"{tag}.png")), cv2.COLOR_BGR2RGB)
+            # Identity drift of the raw render, recorded as a number only (the image is never kept).
+            ident = ident or FaceIdentity()
+            e_a, _ = ident.embed(np.asarray(Image.open(job.path("strict-gov", "35x45mm_600dpi")).convert("RGB")))
+            e_r, _ = ident.embed(render)
+            info["identity_cos_strict_vs_raw_render"] = round(cosine(e_a, e_r), 4) if e_r is not None else None
             h, w = alpha.shape
             to_work = g.resample_scale(w / render.shape[1], h / render.shape[0])
             render_work = cv2.resize(render, (w, h), interpolation=cv2.INTER_CUBIC).astype(np.float32) / 255.0
@@ -348,31 +449,35 @@ def stage_studio_finish(jobs: list[Job], analyzer: FaceAnalyzer) -> None:
             info["gain_ev_p5_p50_p95"] = [round(float(v), 3) for v in np.percentile(lum_ev, [5, 50, 95])]
             extra = [
                 ("relight", info["model"]),
-                ("sampler", f"{info['sampler']}, {info['steps']} steps, cfg {info['cfg']}, seed {info['seed']}"),
+                ("sampler", f"{info.get('sampler', 'flow matching')}, {info['steps']} steps, cfg {info.get('cfg', info.get('guidance'))}, seed {info['seed']}"),
+                ("raw render identity (cos vs strict)", str(info["identity_cos_strict_vs_raw_render"])),
                 ("registration", info["registration"]["method"]),
                 ("lighting field EV p5/50/95", str(info["gain_ev_p5_p50_p95"])),
                 ("chroma gain", str(info["chroma_gain_rgb"])),
                 ("note", "R&D output - generative relighting is not for official ID"),
             ]
             coverage = job.report.get("strict-gov", {}).get("coverage", {})
-            meas = _deliver(job, "studio-ai", comp, alpha, analyzer, obs, fr, fj["crown_cut"], coverage, th["img"], float(th["scale"]), extra)
+            meas = _deliver(job, mode, comp, alpha, analyzer, obs, fr, fj["crown_cut"], coverage, th["img"], float(th["scale"]), extra)
             fg = ph.linear_to_srgb(np.clip(lin, 0, 1))
             strip = np.hstack([
                 _downsample(ph.composite_on_white(fg, alpha)),
                 _downsample(comp),
                 _downsample(_gain_visual(gain, alpha)),
             ])
-            imageio.save_jpeg(job.path("studio-ai", "comparison"), strip, quality=90)
+            imageio.save_jpeg(job.path(mode, "comparison"), strip, quality=90)
             meas["relight"] = info
-            meas["files"]["comparison"] = str(job.path("studio-ai", "comparison"))
+            meas["files"]["comparison"] = str(job.path(mode, "comparison"))
             meas["seconds"] = round(time.perf_counter() - t0, 1)
-            job.save("studio-ai", meas)
+            job.save(mode, meas)
             # The diffusion render is only a lighting source; never keep it as an image.
-            (job.cache / "render.png").unlink(missing_ok=True)
-            _log(f"studio+  {job.stem}: {meas['verdict']}, lighting EV p5/50/95 {info['gain_ev_p5_p50_p95']}, chroma {info['chroma_gain_rgb']}")
+            (job.cache / f"{tag}.png").unlink(missing_ok=True)
+            _log(
+                f"{mode}  {job.stem}: {meas['verdict']}, raw render cos {info['identity_cos_strict_vs_raw_render']}, "
+                f"lighting EV p5/50/95 {info['gain_ev_p5_p50_p95']}, chroma {info['chroma_gain_rgb']}"
+            )
         except Exception as e:  # noqa: BLE001
-            job.save("studio-ai", {"verdict": "ERROR", "error": str(e)})
-            _log(f"studio+  {job.stem}: FAILED {e}" + chr(10) + traceback.format_exc())
+            job.save(mode, {"verdict": "ERROR", "error": str(e)})
+            _log(f"{mode}  {job.stem}: FAILED {e}" + chr(10) + traceback.format_exc())
 
 
 # --------------------------------------------------------------------------- 5. identity
@@ -391,7 +496,7 @@ def stage_identity(jobs: list[Job]) -> dict:
             continue
         src_emb[job.stem] = e_src
         res = {"model": "InsightFace buffalo_l: SCRFD-10GF + ArcFace R50 (WebFace600K)", "source_detection": info_src}
-        for key, mode, kind in (("strict_gov", "strict-gov", "35x45mm_600dpi"), ("studio_ai", "studio-ai", "35x45mm_600dpi")):
+        for key, mode, kind in (("strict_gov", "strict-gov", "35x45mm_600dpi"), ("studio_ai", "studio-ai", "35x45mm_600dpi"), ("virtual_studio", "virtual-studio", "35x45mm_600dpi"), ("studio_flux", "studio-flux", "35x45mm_600dpi")):
             p = job.path(mode, kind)
             if p.exists():
                 e, _ = fi.embed(np.asarray(Image.open(p).convert("RGB")))

@@ -1,14 +1,21 @@
 # govkadr
 
 Phone portraits → 35 × 45 mm biometric photos for Polish ID cards and passports (gov.pl, ICAO 9303),
-fully local. Two modes:
+fully local. Four modes:
 
 * **`strict-gov`**: deterministic and submission-safe. Roll alignment from iris centres, crown-to-chin
   framing (34.1 mm head height, 3.25 mm top margin, centred facial axis), hair-preserving matting onto
   pure `#FFFFFF`, and smooth exposure / white-balance / left-right lighting correction that leaves
   skin texture untouched.
-* **`studio-ai`** (R&D): adds IC-Light neural relighting, registered to the real face and constrained to
-  symmetric soft light, with an ArcFace identity-drift audit. Not for official submission.
+* **`virtual-studio`**: physically based relighting with virtual softboxes (presets `clamshell`,
+  `high-key`, `loop`). Face geometry from the 478-point mesh, no generative model, no generated pixel.
+* **`studio-ai`** (R&D): IC-Light (SD 1.5) relighting, used only as a lighting source.
+* **`studio-flux`** (R&D): FLUX.2 [klein] 4B relighting, used the same way; much more faithful
+  than IC-Light. Needs ~10 GB of free system memory.
+
+The generative modes never keep the AI render: its lighting is registered to the real face and
+applied to the photo, then the render is deleted. Every mode gets an ArcFace identity-drift audit.
+Only `strict-gov` is meant for official submission.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design, model choices and measurements.
 
@@ -23,7 +30,7 @@ uv run govkadr fetch-models
 ```
 
 `fetch-models` downloads ~2.6 GB of pinned weights into `models/` (MediaPipe, BiRefNet, InsightFace,
-IC-Light, Realistic Vision 5.1).
+IC-Light, Realistic Vision 5.1). Add `--flux` for FLUX.2 [klein] 4B (~16 GB more).
 
 ## Run
 
@@ -31,8 +38,10 @@ IC-Light, Realistic Vision 5.1).
 uv run govkadr run --input photos-from-camera --output output
 ```
 
-Options: `--mode strict-gov|studio-ai|both` (default `both`), `--only <name fragments>`, `--limit N`,
-`--from-stage <stage>` (re-run from a stage, reusing cached earlier stages).
+Options: `--mode all|strict-gov|virtual-studio|studio-ai|studio-flux` (default `all`),
+`--preset clamshell|high-key|loop` (virtual-studio), `--only <name fragments>`, `--limit N`,
+`--from-stage <stage>` / `--stages <stage ...>` (re-run part of the pipeline from cache),
+`--allow-low-memory` (run generative stages even with little free memory).
 
 ## Outputs
 
@@ -47,9 +56,12 @@ output/
       <photo>_strict-gov_sheet_10x15cm.jpg    150 x 100 mm sheet, 8 copies, crop marks
       <photo>_strict-gov_sheet_4x6in.jpg      152.4 x 101.6 mm (4x6") sheet, 8 copies
       <photo>_strict-gov_diagnostic.jpg       annotated mesh / axes / compliance zone + checklist
-    studio-ai/
+    virtual-studio/
       ... same set, plus
-      <photo>_studio-ai_comparison.jpg        strict-gov | studio-ai | lighting field applied
+      <photo>_virtual-studio_presets.jpg      strict-gov | clamshell | high-key | loop | surface normals
+    studio-ai/, studio-flux/
+      ... same set, plus
+      <photo>_<mode>_comparison.jpg           strict-gov | relit | lighting field applied
 ```
 
 **Printing:** most "10 × 15" kiosks use 4 × 6 in paper. Print `sheet_4x6in` there (or `sheet_10x15cm`

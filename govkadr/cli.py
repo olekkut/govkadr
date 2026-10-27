@@ -27,7 +27,9 @@ os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 os.environ.setdefault("GLOG_minloglevel", "2")
 
-STAGES = ("analyze", "matting", "strict", "studio", "studio-finish", "identity")
+STAGES = ("analyze", "matting", "strict", "virtual", "studio", "studio-finish", "flux", "flux-finish", "identity")
+# Optional stages per mode ("all" runs everything).
+MODE_STAGES = {"strict-gov": (), "virtual-studio": ("virtual",), "studio-ai": ("studio", "studio-finish"), "studio-flux": ("flux", "flux-finish")}
 
 
 def _jobs(args):
@@ -43,7 +45,7 @@ def _stage(args: argparse.Namespace) -> int:
     jobs = [j.load() for j in _jobs(args)]
     name = args.name
     analyzer = None
-    if name in ("analyze", "strict", "studio-finish"):
+    if name in ("analyze", "strict", "virtual", "studio-finish", "flux-finish"):
         from .landmarks import FaceAnalyzer
         from .weights import FACE_LANDMARKER, fetch_url
 
@@ -54,10 +56,16 @@ def _stage(args: argparse.Namespace) -> int:
         pipeline.stage_matting(jobs)
     elif name == "strict":
         pipeline.stage_strict(jobs, analyzer)
+    elif name == "virtual":
+        pipeline.stage_virtual(jobs, analyzer, os.environ.get("GOVKADR_VIRTUAL_PRESET", "clamshell"))
     elif name == "studio":
         pipeline.stage_studio(jobs)
     elif name == "studio-finish":
         pipeline.stage_studio_finish(jobs, analyzer)
+    elif name == "flux":
+        pipeline.stage_flux(jobs)
+    elif name == "flux-finish":
+        pipeline.stage_studio_finish(jobs, analyzer, "studio-flux", "flux", "flux-finish")
     elif name == "identity":
         pipeline.stage_identity(jobs)
     return 0
@@ -71,9 +79,12 @@ def _run(args: argparse.Namespace) -> int:
     if not jobs:
         print(f"no images in {args.input}")
         return 1
+    os.environ["GOVKADR_VIRTUAL_PRESET"] = args.preset
     if args.allow_low_memory:
         os.environ["GOVKADR_ALLOW_LOW_MEMORY"] = "1"  # inherited by the stage subprocesses
-    stages = [s for s in STAGES if args.mode != "strict-gov" or not s.startswith("studio")]
+    optional = {s for v in MODE_STAGES.values() for s in v}
+    wanted = optional if args.mode in ("all", "both") else set(MODE_STAGES[args.mode])
+    stages = [s for s in STAGES if s not in optional or s in wanted]
     stages = stages[stages.index(args.from_stage) :] if args.from_stage else stages
     if args.stages:
         stages = [s for s in STAGES if s in args.stages]
@@ -125,10 +136,12 @@ def main(argv: list[str] | None = None) -> int:
     common(r)
     r.add_argument(
         "--mode",
-        choices=("both", "strict-gov", "studio-ai"),
-        default="both",
-        help="strict-gov: deterministic, submission-safe; studio-ai: generative relighting on top of it (R&D only)",
+        choices=("all", "both", "strict-gov", "virtual-studio", "studio-ai", "studio-flux"),
+        default="all",
+        help="strict-gov: deterministic, submission-safe; virtual-studio: physically based softbox relighting; "
+        "studio-ai: IC-Light relighting; studio-flux: FLUX.2 [klein] relighting (R&D); all (= both): every mode",
     )
+    r.add_argument("--preset", choices=("clamshell", "high-key", "loop"), default="clamshell", help="virtual-studio light setup")
     r.add_argument("--from-stage", choices=STAGES, help="re-run from this stage, reusing earlier cached stages")
     r.add_argument("--stages", nargs="+", choices=STAGES, help="re-run exactly these stages, reusing every other cached stage")
     r.add_argument(
@@ -141,11 +154,12 @@ def main(argv: list[str] | None = None) -> int:
     common(s)
     f = sub.add_parser("fetch-models", help="download and verify all model weights")
     f.add_argument("--no-generative", action="store_true", help="skip the ~2 GB IC-Light / SD1.5 weights")
+    f.add_argument("--flux", action="store_true", help="also fetch FLUX.2 [klein] 4B (~16 GB) for studio-flux")
     args = p.parse_args(argv)
     if args.cmd == "fetch-models":
         from .weights import fetch_all
 
-        fetch_all(include_generative=not args.no_generative)
+        fetch_all(include_generative=not args.no_generative, include_flux=args.flux)
         return 0
     if args.cmd == "_stage":
         return _stage(args)

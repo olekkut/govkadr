@@ -16,8 +16,11 @@ STAGE_ARTIFACTS = {
     "analyze": ("face.json", "report.analysis.json"),
     "matting": ("matte.npz", "framing.json", "report.matting.json"),
     "strict": ("subject.npz", "thumb.npz", "report.strict-gov.json"),
+    "virtual": ("report.virtual-studio.json",),
     "studio": ("render.json",),  # render.png is transient: deleted once studio-finish used it
     "studio-finish": ("report.studio-ai.json",),
+    "flux": ("flux.json",),  # flux.png is transient, like render.png
+    "flux-finish": ("report.studio-flux.json",),
     "identity": ("report.identity.json",),
 }
 # Extra files a stage owns besides its completion markers.
@@ -25,6 +28,7 @@ STAGE_EXTRAS = {
     "analyze": ("report.source.json",),
     "matting": ("report.framing.json",),
     "studio": ("render_error.txt", "render.png"),
+    "flux": ("flux_error.txt", "flux.png"),
 }
 
 
@@ -79,13 +83,13 @@ class Job:
         return self
 
     def done(self, stage: str) -> bool:
-        if stage == "studio" and self.skipped_studio():
+        if stage in ("studio", "flux") and self.skipped_studio("render" if stage == "studio" else "flux"):
             return True
         return all((self.cache / f).exists() for f in STAGE_ARTIFACTS[stage])
 
-    def skipped_studio(self) -> str | None:
-        """Reason the generative render was deliberately skipped (low memory), if it was."""
-        f = self.cache / "render_error.txt"
+    def skipped_studio(self, tag: str = "render") -> str | None:
+        """Reason a generative render was deliberately skipped (low memory), if it was."""
+        f = self.cache / f"{tag}_error.txt"
         if f.exists():
             text = f.read_text(encoding="utf-8")
             if text.startswith("skipped:"):

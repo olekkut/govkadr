@@ -1,12 +1,14 @@
 # govkadr — architecture
 
 Local pipeline that turns phone portraits into 35 × 45 mm biometric photos for Polish ID cards and
-passports (gov.pl *Zdjęcie do dowodu lub paszportu*, ICAO Doc 9303 Part 3), in two modes:
+passports (gov.pl *Zdjęcie do dowodu lub paszportu*, ICAO Doc 9303 Part 3), in four modes:
 
 | Mode | What it may change | Intended use |
 |---|---|---|
 | `strict-gov` | geometry (one similarity transform), background, *smooth* multiplicative exposure / white-balance / left-right fields | submission-safe output |
-| `studio-ai` | everything above **plus** a diffusion-generated relighting field (IC-Light), constrained and audited | R&D / studio portraits, **not** for official submission |
+| `virtual-studio` | strict-gov **plus** a physically computed softbox lighting field (§2.7); no generative model | studio portraits; `clamshell` / `high-key` presets are ID-style |
+| `studio-ai` | strict-gov **plus** a relighting field taken from IC-Light (SD 1.5), constrained and audited | R&D, **not** for official submission |
+| `studio-flux` | the same with FLUX.2 [klein] 4B as the lighting source (§2.8) | R&D, **not** for official submission |
 
 Every number below was measured on the target machine (RTX 5060 Laptop 8 GB, Ryzen 7 260, Windows 11,
 Pixel 8 Pro test set) unless stated otherwise.
@@ -208,6 +210,56 @@ The before/after and the applied lighting field (as a diverging map) are saved s
 
 ---
 
+### 2.7 virtual-studio — physically based relighting (no generative model)
+
+1. **Geometry.** Per-pixel surface normals: the MediaPipe mesh carries real depth (its z is in
+   the same units as x/y), so a Delaunay triangulation of its 468 vertices gives area-weighted
+   vertex normals, interpolated per pixel. Hair, neck and shoulders get normals of the matte
+   "inflated" into a rounded relief (distance transform → circular profile). The two are
+   feathered together and lightly smoothed. Neural normal estimators (e.g. Sapiens, CC BY-NC)
+   were not needed: soft studio light depends only on large-scale shape.
+2. **Old light.** The photo's lighting is fitted as 2nd-order spherical harmonics of the normal
+   (9 coefficients; Ramamoorthi & Hanrahan 2001), on skin luminance that is normalised-blurred so
+   pores and stubble do not count. On the test photos R² = 0.07–0.55: after strict-gov's
+   left/right balancing little structured light is left to explain, which is expected.
+3. **New light.** Diffuse irradiance from area lights, each softbox sampled as a disc (Fibonacci
+   spiral, 24 samples), plus a white-studio bounce term:
+
+   | Preset | Setup | ID-style |
+   |---|---|---|
+   | clamshell | 56°-wide key 30° above the lens + reflector 28° below, bounce 0.45 | yes (default) |
+   | high-key | 80°-wide frontal key + two side fills at ±60°, bounce 0.7 | yes |
+   | loop | key 40° left / 35° up, weak fill, rim light from behind | no |
+
+4. **Apply** new / old irradiance (old light removed 80 % on the face, 40 % on hair/body where the
+   fit extrapolates), normalised to unchanged median skin exposure. ID presets may darken by at
+   most 0.6 EV (no contouring); loop may move ±1.2 EV. Runs in ~4 s per photo on the CPU.
+
+Self-shadowing is not ray-traced; with large soft sources it is faint. Baked-in hard shadows are
+softened only as far as the fit explains them.
+
+### 2.8 studio-flux — FLUX.2 [klein] 4B as the lighting source
+
+FLUX.2 [klein] 4B (Black Forest Labs, Apache-2.0) is a distilled 4-step rectified-flow
+transformer with a Qwen3-4B text encoder that edits a reference image from an instruction. The
+model card asks for ~13 GB of VRAM; on the 8 GB card:
+
+* the 8 GB text encoder runs once on the CPU and the prompt embedding is cached on disk;
+* the transformer is stored on the GPU in float8 e4m3 (3.8 GB) and computed in bfloat16. Its bf16
+  weights are zero-copy views of the read-only file mapping, cast to fp8 and moved to the GPU;
+  `from_pretrained` would first copy all 7.75 GB into RAM. That ~13 GB load peak crashed the stage
+  natively when only 10 GB was free;
+* the VAE runs in bfloat16 on the GPU.
+
+Measured with the streamed loader: 42 s to load (6.7 GB process commit), 10.6–14 s per
+768 × 992 render, 5.56 GB peak VRAM, 8.7 GB process commit at peak. The stage waits for 10 GB
+of free commit and otherwise skips itself. The render is used
+exactly like IC-Light's (registered, skin-only, symmetrised lighting and colour field), except that
+global exposure (±0.5 EV) and local shaping (±0.75 EV) are now limited separately. FLUX renders
+about 1 EV brighter overall, and a single clamp flattened the shading into a uniform lift.
+Its raw render is far more faithful than IC-Light's: ArcFace cosine to the strict-gov photo of
+0.82–0.93 on test photos, against ~0.69. It still alters hair tone, lip colour and fabric.
+
 ## 3. Memory strategy (RTX 5060 8 GB, ~5 GB free commit)
 
 | Measure | Effect |
@@ -290,6 +342,24 @@ Reading the audit: strict-gov is effectively identity-neutral. studio-ai drifts 
 photos of the same person usually differ (0.897 > median 0.830). The unmodified generative render drifted
 *more* than any pair of real photos (0.689 < min 0.714), which is why it is used only as a
 lighting oracle and then discarded.
+
+**All four modes** (same 32 photos; ArcFace cosine of each delivered photo to its source, and of
+each generative mode's raw render to the strict-gov photo, recorded as a number only):
+
+| Mode | Verdicts | cos(source, delivered) | raw render cos |
+|---|---|---|---|
+| strict-gov | 27 PASS, 5 WARN | 0.988 (0.981–0.992) | – |
+| virtual-studio (clamshell) | 27 PASS, 5 WARN | 0.906 (0.870–0.942) | – (no generative model) |
+| studio-ai (IC-Light) | 26 PASS, 5 WARN, 1 FAIL | 0.891 (0.866–0.922) | 0.694 (0.624–0.758) |
+| studio-flux (FLUX.2 klein) | 27 PASS, 5 WARN | **0.949** (0.921–0.964) | **0.910** (0.817–0.950) |
+
+The one FAIL is a background at 99.50 % exactly `#FFFFFF`, just under this project's own 99.5 %
+threshold (JPEG ringing beside brightened hair); 99.999 % of it is ≥ 250.
+
+The virtual-studio row is a useful calibration. It generates no pixels, yet its score drops to
+0.906 simply because the light changed, so ArcFace reacts to lighting as well as identity. Part
+of every relit mode's drop is therefore lighting, not a changed face. The raw-render column is
+where real redrawing shows: FLUX.2 [klein] stays close to the person (0.91), IC-Light does not (0.69).
 
 Timing (reference run, all 32 photos): analyze ~1.5 s, matting ~0.4 s (after a ~25 s model load),
 strict ~7 s, IC-Light ~7 s, studio-finish ~4 s, identity ~3 s per photo; ~21 min end to end,

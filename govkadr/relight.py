@@ -271,7 +271,10 @@ def transfer_lighting(
     mirrored = cv2.remap(field, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
     asym = float(np.abs(0.5 * (field - mirrored))[m].mean() / np.log(2)) if m.any() else 0.0
     field = 0.5 * (field + mirrored)
-    field = np.clip(field, -max_ev * np.log(2), max_ev * np.log(2))
+    # Global exposure and local shaping are limited separately: a high-key render that is 1 EV
+    # brighter overall must not saturate the clamp and flatten its shading into a uniform lift.
+    ln2 = np.log(2)
+    field = np.clip(glob, -0.5 * ln2, 0.5 * ln2) + np.clip(field - glob, -max_ev * ln2, max_ev * ln2)
     gain_y = np.exp(cv2.resize(field, (w, h), interpolation=cv2.INTER_CUBIC))
 
     # Colour, split in two: the render's global white balance (gentle), and a local zero-mean skin
