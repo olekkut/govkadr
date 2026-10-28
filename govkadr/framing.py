@@ -42,12 +42,7 @@ def roi_transform(obs: FaceObservation, height_px: int, top_extra: float = 0.0) 
     x0, x1 = -1.6 * d, 1.6 * d
     y0, y1 = -(2.0 + top_extra) * d, 2.1 * d
     w_px = int(round(height_px * (x1 - x0) / (y1 - y0) / 32.0)) * 32
-    m = (
-        g.translate(-0.5, -0.5)
-        @ g.scale(w_px / (x1 - x0), height_px / (y1 - y0))
-        @ g.translate(-x0, -y0)
-        @ rotated_frame(obs)
-    )
+    m = g.translate(-0.5, -0.5) @ g.scale(w_px / (x1 - x0), height_px / (y1 - y0)) @ g.translate(-x0, -y0) @ rotated_frame(obs)
     return m, (w_px, height_px), (x0, x1, y0, y1)
 
 
@@ -111,7 +106,7 @@ class Framing:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Framing":
+    def from_dict(cls, d: dict) -> Framing:
         return cls(np.array(d["m_out"]), d["scale"], tuple(d["crown_rot"]), tuple(d["chin_rot"]), d["axis_x_rot"], d["head_src_px"])
 
 
@@ -132,12 +127,7 @@ def solve(obs: FaceObservation, crown_rot: tuple[float, float], spec: PhotoSpec 
     axis = face_axis_x(pts_rot)
     head = float(chin[1] - crown_rot[1])
     s = spec.head_target_px / head
-    m_out = (
-        g.translate((spec.width_px - 1) / 2.0, spec.top_margin_target_px - 0.5)
-        @ g.scale(s)
-        @ g.translate(-axis, -crown_rot[1])
-        @ r
-    )
+    m_out = g.translate((spec.width_px - 1) / 2.0, spec.top_margin_target_px - 0.5) @ g.scale(s) @ g.translate(-axis, -crown_rot[1]) @ r
     return Framing(m_out, s, (float(crown_rot[0]), float(crown_rot[1])), (float(chin[0]), float(chin[1])), axis, head)
 
 

@@ -30,8 +30,8 @@ from . import framing, imageio, overlay, resources, sheet
 from . import geometry as g
 from . import photometric as ph
 from .compliance import measure
-from .landmarks import CHIN, FaceAnalyzer, FaceObservation, NoFaceError, iris_centres
 from .jobs import Job, make_jobs, write_json
+from .landmarks import CHIN, FaceAnalyzer, FaceObservation, NoFaceError, iris_centres
 from .spec import PHOTO, SHEET_4x6, SHEET_10x15
 
 K = 2  # supersampling of the working canvas relative to the 826x1062 output
@@ -39,7 +39,13 @@ MODES = ("strict-gov", "studio-ai")
 
 
 def _save_obs(path: Path, obs: FaceObservation) -> None:
-    write_json(path, {k: getattr(obs, k) for k in ("points", "eye_angle_rad", "blendshapes", "pose_deg", "faces_detected", "passes", "angle_history_deg", "angle_stderr_deg", "tta_samples")})
+    write_json(
+        path,
+        {
+            k: getattr(obs, k)
+            for k in ("points", "eye_angle_rad", "blendshapes", "pose_deg", "faces_detected", "passes", "angle_history_deg", "angle_stderr_deg", "tta_samples")
+        },
+    )
 
 
 def _load_obs(path: Path) -> FaceObservation:
@@ -64,15 +70,18 @@ def stage_analyze(jobs: list[Job], analyzer: FaceAnalyzer) -> None:
             _save_obs(job.cache / "face.json", obs)
             left, right = iris_centres(obs.points)
             job.save("source", meta)
-            job.save("analysis", {
-                "faces_detected": obs.faces_detected,
-                "eye_line_tilt_deg": round(obs.eye_angle_deg, 3),
-                "eye_line_tilt_stderr_deg": round(obs.angle_stderr_deg, 3),
-                "applied_rotation_deg_ccw": round(obs.eye_angle_deg, 3),
-                "estimate_history_deg": [round(a, 3) for a in obs.angle_history_deg],
-                "inter_pupillary_px_source": round(float(np.linalg.norm(right - left)), 1),
-                "pose_deg": {k: round(v, 2) for k, v in obs.pose_deg.items()},
-            })
+            job.save(
+                "analysis",
+                {
+                    "faces_detected": obs.faces_detected,
+                    "eye_line_tilt_deg": round(obs.eye_angle_deg, 3),
+                    "eye_line_tilt_stderr_deg": round(obs.angle_stderr_deg, 3),
+                    "applied_rotation_deg_ccw": round(obs.eye_angle_deg, 3),
+                    "estimate_history_deg": [round(a, 3) for a in obs.angle_history_deg],
+                    "inter_pupillary_px_source": round(float(np.linalg.norm(right - left)), 1),
+                    "pose_deg": {k: round(v, 2) for k, v in obs.pose_deg.items()},
+                },
+            )
             _log(f"analyze  {job.stem}: tilt {obs.eye_angle_deg:+.2f} deg (+/-{obs.angle_stderr_deg:.2f}), IPD {np.linalg.norm(right - left):.0f}px")
         except NoFaceError as e:
             job.fail(f"analyze: {e}")
@@ -135,20 +144,29 @@ def stage_matting(jobs: list[Job]) -> None:
                 break
             np.savez_compressed(job.cache / "matte.npz", alpha=alpha.astype(np.float16), m_roi=m_roi)
             write_json(job.cache / "framing.json", {**fr.to_dict(), "crown_cut": crown.touches_source_top})
-            job.save("matting", {
-                "model": model.name,
-                "roi_px": [w, h],
-                **model.last,
-                "crown_touches_photo_edge": crown.touches_source_top,
-                "notes": notes,
-            })
-            job.save("framing", {
-                "scale_output_px_per_source_px": round(fr.scale, 5),
-                "head_height_source_px": round(fr.head_src_px, 1),
-                "crown_above_eye_line_source_px": round(-fr.crown_rot[1], 1),
-                "chin_below_eye_line_source_px": round(fr.chin_rot[1], 1),
-            })
-            _log(f"matting  {job.stem}: {w}x{h} in {model.last.get('seconds')}s, head {fr.head_src_px:.0f}px src, scale {fr.scale:.4f}" + (" CROWN CUT" if crown.touches_source_top else ""))
+            job.save(
+                "matting",
+                {
+                    "model": model.name,
+                    "roi_px": [w, h],
+                    **model.last,
+                    "crown_touches_photo_edge": crown.touches_source_top,
+                    "notes": notes,
+                },
+            )
+            job.save(
+                "framing",
+                {
+                    "scale_output_px_per_source_px": round(fr.scale, 5),
+                    "head_height_source_px": round(fr.head_src_px, 1),
+                    "crown_above_eye_line_source_px": round(-fr.crown_rot[1], 1),
+                    "chin_below_eye_line_source_px": round(fr.chin_rot[1], 1),
+                },
+            )
+            _log(
+                f"matting  {job.stem}: {w}x{h} in {model.last.get('seconds')}s, head {fr.head_src_px:.0f}px src, scale {fr.scale:.4f}"
+                + (" CROWN CUT" if crown.touches_source_top else "")
+            )
         except Exception as e:  # noqa: BLE001 - one bad photo must not stop the batch
             job.fail(f"matting: {e}")
             _log(f"matting  {job.stem}: FAILED {e}\n{traceback.format_exc()}")
@@ -176,7 +194,9 @@ def _downsample(x: np.ndarray) -> np.ndarray:
     return cv2.resize(x, (PHOTO.width_px, PHOTO.height_px), interpolation=cv2.INTER_AREA)
 
 
-def _deliver(job: Job, mode: str, comp_work: np.ndarray, alpha_work: np.ndarray, analyzer, obs, fr, crown_cut, coverage_info, src_small, src_scale, extra) -> dict:
+def _deliver(
+    job: Job, mode: str, comp_work: np.ndarray, alpha_work: np.ndarray, analyzer, obs, fr, crown_cut, coverage_info, src_small, src_scale, extra
+) -> dict:
     """Downsample, save, re-measure, and write diagnostics + print sheets for one mode."""
     out = imageio.to_uint8(_downsample(comp_work))
     alpha_out = _downsample(alpha_work)
@@ -186,8 +206,17 @@ def _deliver(job: Job, mode: str, comp_work: np.ndarray, alpha_work: np.ndarray,
     info = imageio.inspect_output(photo_path)
     meas, out_obs = measure(delivered, alpha_out, analyzer, info, obs, coverage_info, crown_cut)
     diag = overlay.compose(
-        src_small, src_scale, obs, fr.m_out, delivered, alpha_out, out_obs, meas,
-        f"govkadr · {mode}", f"{job.src.name} · 35x45 mm @ 600 dpi · gov.pl / ICAO 9303", extra,
+        src_small,
+        src_scale,
+        obs,
+        fr.m_out,
+        delivered,
+        alpha_out,
+        out_obs,
+        meas,
+        f"govkadr · {mode}",
+        f"{job.src.name} · 35x45 mm @ 600 dpi · gov.pl / ICAO 9303",
+        extra,
     )
     imageio.save_jpeg(job.path(mode, "diagnostic"), diag, quality=90)
     for spec in (SHEET_10x15, SHEET_4x6):
@@ -244,7 +273,9 @@ def stage_strict(jobs: list[Job], analyzer: FaceAnalyzer) -> None:
             np.savez_compressed(job.cache / "subject.npz", lin=lin.astype(np.float16), alpha=alpha.astype(np.float16), pts=pts)
             np.savez_compressed(job.cache / "thumb.npz", img=src_small, scale=src_scale)
             m = meas["measurements"]
-            _log(f"strict   {job.stem}: {meas['verdict']} head {m['head_height_mm']}mm offset {m['horizontal_offset_mm']:+.2f}mm roll {m['roll_residual_deg']:+.3f} ({meas['seconds']}s)")
+            _log(
+                f"strict   {job.stem}: {meas['verdict']} head {m['head_height_mm']}mm offset {m['horizontal_offset_mm']:+.2f}mm roll {m['roll_residual_deg']:+.3f} ({meas['seconds']}s)"
+            )
         except Exception as e:  # noqa: BLE001
             job.fail(f"strict-gov: {e}")
             _log(f"strict   {job.stem}: FAILED {e}\n{traceback.format_exc()}")
@@ -321,12 +352,14 @@ def stage_fill(jobs: list[Job]) -> None:
             lin_f = fl.blend(lin, fill_lin, mask)
             alpha_f = fl.alpha_from_fill(ph.linear_to_srgb(fill_lin), alpha, mask)
             np.savez_compressed(job.cache / "subject_filled.npz", lin=lin_f.astype(np.float16), alpha=alpha_f.astype(np.float16), pts=pts)
-            info.update({
-                "applied": True,
-                "pixels": int(mask.sum()),
-                "area_mm2_on_print": round(float(mask.sum()) / (K * K) / (PHOTO.width_px / PHOTO.width_mm) ** 2, 1),
-                "reference_photo": ref_job.src.name if ref_job else None,
-            })
+            info.update(
+                {
+                    "applied": True,
+                    "pixels": int(mask.sum()),
+                    "area_mm2_on_print": round(float(mask.sum()) / (K * K) / (PHOTO.width_px / PHOTO.width_mm) ** 2, 1),
+                    "reference_photo": ref_job.src.name if ref_job else None,
+                }
+            )
             write_json(job.cache / "fill.json", info)
             _log(f"fill     {job.stem}: {info['area_mm2_on_print']} mm2 generated, reference {info['reference_photo']}, {info['seconds']}s")
         except Exception as e:  # noqa: BLE001
@@ -390,7 +423,9 @@ def stage_virtual(jobs: list[Job], analyzer: FaceAnalyzer, preset_name: str = "c
             meas["files"]["presets"] = str(job.path("virtual-studio", "presets"))
             meas["seconds"] = round(time.perf_counter() - t0, 1)
             job.save("virtual-studio", meas)
-            _log(f"virtual  {job.stem}: {meas['verdict']}, {preset.name} skin EV {infos[preset.name]['skin_gain_ev_p5_p50_p95']}, SH R2 {infos[preset.name]['old_light_fit_r2']}")
+            _log(
+                f"virtual  {job.stem}: {meas['verdict']}, {preset.name} skin EV {infos[preset.name]['skin_gain_ev_p5_p50_p95']}, SH R2 {infos[preset.name]['old_light_fit_r2']}"
+            )
         except Exception as e:  # noqa: BLE001
             job.save("virtual-studio", {"verdict": "ERROR", "error": str(e)})
             _log(f"virtual  {job.stem}: FAILED {e}" + chr(10) + traceback.format_exc())
@@ -437,7 +472,9 @@ def stage_studio(jobs: list[Job]) -> None:
                 render, info = relighter.relight(grey)
                 cv2.imwrite(str(job.cache / "render.png"), cv2.cvtColor(render, cv2.COLOR_RGB2BGR))
                 write_json(job.cache / "render.json", info)
-                _log(f"studio   {job.stem}: rendered in {info['seconds']}s, peak VRAM {info['peak_vram_gb']} GB, free commit {resources.free_commit_gb():.2f} GB")
+                _log(
+                    f"studio   {job.stem}: rendered in {info['seconds']}s, peak VRAM {info['peak_vram_gb']} GB, free commit {resources.free_commit_gb():.2f} GB"
+                )
                 break
             except (MemoryError, RuntimeError) as e:
                 if attempt == 0 and (isinstance(e, MemoryError) or "memory" in str(e).lower()):
@@ -561,11 +598,13 @@ def stage_studio_finish(jobs: list[Job], analyzer: FaceAnalyzer, mode: str = "st
             coverage = job.report.get("strict-gov", {}).get("coverage", {})
             meas = _deliver(job, mode, comp, alpha, analyzer, obs, fr, fj["crown_cut"], coverage, th["img"], float(th["scale"]), extra)
             fg = ph.linear_to_srgb(np.clip(lin, 0, 1))
-            strip = np.hstack([
-                _downsample(ph.composite_on_white(fg, alpha)),
-                _downsample(comp),
-                _downsample(_gain_visual(gain, alpha)),
-            ])
+            strip = np.hstack(
+                [
+                    _downsample(ph.composite_on_white(fg, alpha)),
+                    _downsample(comp),
+                    _downsample(_gain_visual(gain, alpha)),
+                ]
+            )
             imageio.save_jpeg(job.path(mode, "comparison"), strip, quality=90)
             meas["relight"] = info
             meas["files"]["comparison"] = str(job.path(mode, "comparison"))
@@ -598,7 +637,12 @@ def stage_identity(jobs: list[Job]) -> dict:
             continue
         src_emb[job.stem] = e_src
         res = {"model": "InsightFace buffalo_l: SCRFD-10GF + ArcFace R50 (WebFace600K)", "source_detection": info_src}
-        for key, mode, kind in (("strict_gov", "strict-gov", "35x45mm_600dpi"), ("studio_ai", "studio-ai", "35x45mm_600dpi"), ("virtual_studio", "virtual-studio", "35x45mm_600dpi"), ("studio_flux", "studio-flux", "35x45mm_600dpi")):
+        for key, mode, kind in (
+            ("strict_gov", "strict-gov", "35x45mm_600dpi"),
+            ("studio_ai", "studio-ai", "35x45mm_600dpi"),
+            ("virtual_studio", "virtual-studio", "35x45mm_600dpi"),
+            ("studio_flux", "studio-flux", "35x45mm_600dpi"),
+        ):
             p = job.path(mode, kind)
             if p.exists():
                 e, _ = fi.embed(np.asarray(Image.open(p).convert("RGB")))
@@ -633,7 +677,9 @@ def stage_identity(jobs: list[Job]) -> dict:
             if b is not None and baseline:
                 res["studio_ai_drift"] = round(1 - b, 4)
                 res["studio_ai_drift_vs_natural_variation"] = (
-                    "smaller than the drift between two real shots (median)" if b >= baseline["median"] else "larger than the median drift between two real shots"
+                    "smaller than the drift between two real shots (median)"
+                    if b >= baseline["median"]
+                    else "larger than the median drift between two real shots"
                 )
             job.save("identity", res)
     if jobs:

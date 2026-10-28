@@ -148,10 +148,13 @@ def irradiance(n: np.ndarray, preset: Preset, samples: int = 24) -> np.ndarray:
         for i in range(samples):
             r = tan_r * math.sqrt((i + 0.5) / samples)
             phi = i * golden
-            ld = d + r * (math.cos(phi) * t + math.sin(phi) * bt)
-            ld /= np.linalg.norm(ld)
-            acc += np.clip(n @ ld.astype(np.float32), 0, None)
-        e = e + light.intensity * acc / samples
+            # Each sample and its mirror across the disc's axis: a frontal softbox then lights the
+            # face exactly symmetrically (a bare spiral is slightly lopsided).
+            for sign in (1.0, -1.0):
+                ld = d + r * (sign * math.cos(phi) * t + math.sin(phi) * bt)
+                ld /= np.linalg.norm(ld)
+                acc += np.clip(n @ ld.astype(np.float32), 0, None)
+        e = e + light.intensity * acc / (2 * samples)
     return e.astype(np.float32)
 
 
@@ -192,7 +195,9 @@ def build_geometry(lin: np.ndarray, alpha: np.ndarray, pts3_work: np.ndarray, sk
     return Geometry(n, skin, wf, coef.astype(np.float32), r2)
 
 
-def relight(lin: np.ndarray, alpha: np.ndarray, geo: Geometry, preset: Preset, removal: float = 0.8, max_ev: float = 1.2) -> tuple[np.ndarray, np.ndarray, dict]:
+def relight(
+    lin: np.ndarray, alpha: np.ndarray, geo: Geometry, preset: Preset, removal: float = 0.8, max_ev: float = 1.2
+) -> tuple[np.ndarray, np.ndarray, dict]:
     # ID presets may brighten freely but darken at most ~0.6 EV (no contouring on an ID photo).
     min_ev = 0.6 if preset.id_suitable else max_ev
     """Multiply the photo by new / old irradiance (exposure-normalised on skin)."""

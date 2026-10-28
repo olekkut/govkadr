@@ -71,7 +71,19 @@ def measure(
     bg = background_stats(img, alpha)
     bs = obs.blendshapes
     blink = max(bs.get("eyeBlinkLeft", 0.0), bs.get("eyeBlinkRight", 0.0))
-    gaze = max(bs.get(k, 0.0) for k in ("eyeLookInLeft", "eyeLookInRight", "eyeLookOutLeft", "eyeLookOutRight", "eyeLookUpLeft", "eyeLookUpRight", "eyeLookDownLeft", "eyeLookDownRight"))
+    gaze = max(
+        bs.get(k, 0.0)
+        for k in (
+            "eyeLookInLeft",
+            "eyeLookInRight",
+            "eyeLookOutLeft",
+            "eyeLookOutRight",
+            "eyeLookUpLeft",
+            "eyeLookUpRight",
+            "eyeLookDownLeft",
+            "eyeLookDownRight",
+        )
+    )
     smile = max(bs.get("mouthSmileLeft", 0.0), bs.get("mouthSmileRight", 0.0))
     jaw = bs.get("jawOpen", 0.0)
     yaw, pitch = source_obs.pose_deg.get("yaw", float("nan")), source_obs.pose_deg.get("pitch", float("nan"))
@@ -101,29 +113,57 @@ def measure(
         "pose_source_deg": {k: round(v, 2) for k, v in source_obs.pose_deg.items()},
     }
     checks = {
-        "pixel_dimensions": _check((file_info["width_px"], file_info["height_px"]) == (spec.width_px, spec.height_px), f'{file_info["width_px"]}x{file_info["height_px"]}', f"{spec.width_px}x{spec.height_px} px (35x45 mm @ 600 dpi)"),
-        "dpi_metadata": _check(file_info["jfif_dpi"] == [600.0, 600.0] and file_info["exif_dpi"] == [600.0, 600.0], {"jfif": file_info["jfif_dpi"], "exif": file_info["exif_dpi"]}, "600 dpi in JFIF and EXIF"),
+        "pixel_dimensions": _check(
+            (file_info["width_px"], file_info["height_px"]) == (spec.width_px, spec.height_px),
+            f"{file_info['width_px']}x{file_info['height_px']}",
+            f"{spec.width_px}x{spec.height_px} px (35x45 mm @ 600 dpi)",
+        ),
+        "dpi_metadata": _check(
+            file_info["jfif_dpi"] == [600.0, 600.0] and file_info["exif_dpi"] == [600.0, 600.0],
+            {"jfif": file_info["jfif_dpi"], "exif": file_info["exif_dpi"]},
+            "600 dpi in JFIF and EXIF",
+        ),
         "file_size": _check(file_info["file_bytes"] <= spec.max_file_bytes, file_info["file_bytes"], "<= 2.5 MB (gov.pl upload)"),
-        "online_min_resolution": _check(file_info["width_px"] >= spec.min_px_passport[0] and file_info["height_px"] >= spec.min_px_passport[1], f'{file_info["width_px"]}x{file_info["height_px"]}', "ID >= 492x633, passport >= 768x1004"),
+        "online_min_resolution": _check(
+            file_info["width_px"] >= spec.min_px_passport[0] and file_info["height_px"] >= spec.min_px_passport[1],
+            f"{file_info['width_px']}x{file_info['height_px']}",
+            "ID >= 492x633, passport >= 768x1004",
+        ),
         "colour_profile": _check(file_info["icc_profile"] is not None and "sRGB" in file_info["icc_profile"], file_info["icc_profile"], "embedded sRGB ICC"),
-        "head_height": _check(spec.head_min_mm <= head_mm <= spec.head_max_mm, f"{head_mm:.2f} mm / {head_px:.0f} px", f"{spec.head_min_mm}-{spec.head_max_mm} mm (target {spec.head_target_mm})"),
-        "top_margin": _check(spec.top_margin_min_mm - 0.1 <= top_mm <= spec.top_margin_max_mm + 0.1, f"{top_mm:.2f} mm", f"{spec.top_margin_min_mm}-{spec.top_margin_max_mm} mm above crown", soft=True),
+        "head_height": _check(
+            spec.head_min_mm <= head_mm <= spec.head_max_mm,
+            f"{head_mm:.2f} mm / {head_px:.0f} px",
+            f"{spec.head_min_mm}-{spec.head_max_mm} mm (target {spec.head_target_mm})",
+        ),
+        "top_margin": _check(
+            spec.top_margin_min_mm - 0.1 <= top_mm <= spec.top_margin_max_mm + 0.1,
+            f"{top_mm:.2f} mm",
+            f"{spec.top_margin_min_mm}-{spec.top_margin_max_mm} mm above crown",
+            soft=True,
+        ),
         "horizontal_centering": _check(abs(offset_mm) <= spec.center_tolerance_mm, f"{offset_mm:+.2f} mm", f"+/-{spec.center_tolerance_mm} mm (target 0.0)"),
         "eye_line_level": _check(abs(roll) <= 0.5, f"{roll:+.3f} deg", "head not tilted (residual |roll| <= 0.5 deg)"),
         "background_uniform_white": _check(
             (bg["pure_white_fraction"] or 0) >= 0.995 and (bg["visually_white_fraction"] or 0) >= 0.999 and bg["top_row_white"],
-            f'{100 * (bg["pure_white_fraction"] or 0):.2f} % #FFFFFF, {100 * (bg["visually_white_fraction"] or 0):.3f} % >= 250',
+            f"{100 * (bg['pure_white_fraction'] or 0):.2f} % #FFFFFF, {100 * (bg['visually_white_fraction'] or 0):.3f} % >= 250",
             ">= 99.5 % exactly #FFFFFF, >= 99.9 % >= 250, clear top edge",
         ),
         "crown_in_source": _check(not crown_cut, "cut by photo edge" if crown_cut else "fully visible", "whole head visible in the source photo"),
-        "source_coverage": _check(coverage_issue_px.get("subject_rows_filled", 0) <= 3, coverage_issue_px, "subject fully inside the source photo (no edge fill)", soft=True),
+        "source_coverage": _check(
+            coverage_issue_px.get("subject_rows_filled", 0) <= 3, coverage_issue_px, "subject fully inside the source photo (no edge fill)", soft=True
+        ),
         "single_face": _check(source_obs.faces_detected == 1, source_obs.faces_detected, "only the photographed person in frame", soft=True),
         "eyes_open": _check(blink < 0.5, round(blink, 3), "eyes naturally open (blink score < 0.5)", soft=True),
         "mouth_closed": _check(jaw < 0.12, round(jaw, 3), "mouth closed (jawOpen < 0.12)", soft=True),
         "neutral_expression": _check(smile < 0.45, round(smile, 3), "neutral expression (smile < 0.45)", soft=True),
         "gaze_at_camera": _check(gaze < 0.55, round(gaze, 3), "looking at the lens (eyeLook* < 0.55)", soft=True),
         "frontal_pose": _check(abs(yaw) <= 5 and abs(pitch) <= 5, f"yaw {yaw:+.1f}, pitch {pitch:+.1f} deg", "|yaw|, |pitch| <= 5 deg (ICAO)", soft=True),
-        "eye_line_height": _check(spec.eye_line_min_frac <= eye_frac <= spec.eye_line_max_frac, f"{100 * eye_frac:.1f} % from bottom", "50-70 % of height (ISO/IEC 19794-5, informational)", soft=True),
+        "eye_line_height": _check(
+            spec.eye_line_min_frac <= eye_frac <= spec.eye_line_max_frac,
+            f"{100 * eye_frac:.1f} % from bottom",
+            "50-70 % of height (ISO/IEC 19794-5, informational)",
+            soft=True,
+        ),
     }
     statuses = [c["status"] for c in checks.values()]
     verdict = "FAIL" if "FAIL" in statuses else ("PASS_WITH_WARNINGS" if "WARN" in statuses else "PASS")

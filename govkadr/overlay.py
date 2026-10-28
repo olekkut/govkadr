@@ -128,13 +128,13 @@ def annotate_output(out_rgb: np.ndarray, alpha: np.ndarray, obs: FaceObservation
     lab = (255, 255, 255)
     # Head-height label at ~30 % of the head (forehead level), clear of the eye-line label.
     label_y = crown_y + 0.3 * (chin_y - crown_y)
-    _text(dr, (dim_x + 10, label_y - 2), f'{m["head_height_mm"]:.2f} mm', C_HEAD, 24, True, "ld", bg=lab)
-    _text(dr, (dim_x + 10, label_y + 6), f'{m["head_height_px"]:.0f} px', C_HEAD, 24, True, "la", bg=lab)
-    _text(dr, (0.5 * (x0 + axis_x) + 8, 0.5 * crown_y), f'{m["top_margin_mm"]:.2f} mm', C_GUIDE, 20, True, "lm", bg=lab)
+    _text(dr, (dim_x + 10, label_y - 2), f"{m['head_height_mm']:.2f} mm", C_HEAD, 24, True, "ld", bg=lab)
+    _text(dr, (dim_x + 10, label_y + 6), f"{m['head_height_px']:.0f} px", C_HEAD, 24, True, "la", bg=lab)
+    _text(dr, (0.5 * (x0 + axis_x) + 8, 0.5 * crown_y), f"{m['top_margin_mm']:.2f} mm", C_GUIDE, 20, True, "lm", bg=lab)
     _text(dr, (w - 8, z_top + 4), "max 36.0 mm", C_ZONE, 18, True, "ra", bg=lab)
     _text(dr, (w - 8, z_bot - 4), "min 31.5 mm", C_ZONE, 18, True, "rd", bg=lab)
-    _text(dr, (max(8.0, left[0] - ext[0]), left[1] - 8), f'eye line {m["roll_residual_deg"]:+.2f}°', C_EYE, 20, True, "ld", bg=lab)
-    _text(dr, (axis_x + 8, h - 16), f'axis {m["horizontal_offset_mm"]:+.2f} mm', C_AXIS, 20, True, "ld", bg=lab)
+    _text(dr, (max(8.0, left[0] - ext[0]), left[1] - 8), f"eye line {m['roll_residual_deg']:+.2f}°", C_EYE, 20, True, "ld", bg=lab)
+    _text(dr, (axis_x + 8, h - 16), f"axis {m['horizontal_offset_mm']:+.2f} mm", C_AXIS, 20, True, "ld", bg=lab)
     _text(dr, (8, e_top + 4), "ISO eye zone", C_AXIS, 16, False, "la", bg=lab)
     return np.asarray(pil)
 
@@ -193,7 +193,19 @@ def source_thumbnail(source_rgb: np.ndarray, height: int = DIAG_HEIGHT) -> tuple
     return small, s
 
 
-def compose(src_small: np.ndarray, src_scale: float, src_obs: FaceObservation, m_out: np.ndarray, out_rgb: np.ndarray, alpha: np.ndarray, out_obs: FaceObservation, meas: dict, title: str, subtitle: str, extra: list[tuple[str, str]]) -> np.ndarray:
+def compose(
+    src_small: np.ndarray,
+    src_scale: float,
+    src_obs: FaceObservation,
+    m_out: np.ndarray,
+    out_rgb: np.ndarray,
+    alpha: np.ndarray,
+    out_obs: FaceObservation,
+    meas: dict,
+    title: str,
+    subtitle: str,
+    extra: list[tuple[str, str]],
+) -> np.ndarray:
     right = annotate_output(out_rgb, alpha, out_obs, meas, DIAG_ZOOM)
     hgt = right.shape[0]
     left = annotate_source(src_small[:hgt], src_scale, src_obs, m_out)

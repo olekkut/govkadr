@@ -1,96 +1,147 @@
 # govkadr
 
-Phone portraits → 35 × 45 mm biometric photos for Polish ID cards and passports (gov.pl, ICAO 9303),
-fully local. Four modes:
+[![CI](https://github.com/olekkut/govkadr/actions/workflows/ci.yml/badge.svg)](https://github.com/olekkut/govkadr/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)
+![CUDA](https://img.shields.io/badge/GPU-NVIDIA%20CUDA-76b900.svg)
 
-* **`strict-gov`**: deterministic and submission-safe. Roll alignment from iris centres, crown-to-chin
-  framing (34.1 mm head height, 3.25 mm top margin, centred facial axis), hair-preserving matting onto
-  pure `#FFFFFF`, and smooth exposure / white-balance / left-right lighting correction that leaves
-  skin texture untouched.
-* **`virtual-studio`**: physically based relighting with virtual softboxes (presets `clamshell`,
-  `high-key`, `loop`). Face geometry from the 478-point mesh, no generative model, no generated pixel.
-* **`studio-ai`** (R&D): IC-Light (SD 1.5) relighting, used only as a lighting source.
-* **`studio-flux`** (R&D): FLUX.2 [klein] 4B relighting, used the same way; much more faithful
-  than IC-Light. Needs ~9 GB of free system memory.
+**Turn phone portraits into compliant 35 × 45 mm photos for Polish ID cards and passports**
+(gov.pl *Zdjęcie do dowodu lub paszportu*, ICAO Doc 9303), fully locally, with every requirement
+re-measured on the delivered file.
 
-The generative modes never keep the AI render: its lighting is registered to the real face and
-applied to the photo, then the render is deleted. Every mode gets an ArcFace identity-drift audit.
-Only `strict-gov` is meant for official submission.
+govkadr is a command-line pipeline plus a small local GUI. Point it at a folder of photos and it produces,
+for each one, a print-ready 826 × 1062 px / 600 dpi photo, kiosk print sheets with crop marks, an annotated
+diagnostic sheet and a JSON compliance report. Optional studio modes relight the photo, and an identity
+audit measures how much each mode changed the face.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the design, model choices and measurements.
+## Highlights
 
-## Setup
+- **Precise geometry.** A 478-point face mesh (MediaPipe) with test-time augmentation levels the
+  eye line from the iris centres (±0.05° uncertainty), and the crown is taken from the hair silhouette,
+  not the forehead. One composed, anti-aliased transform gives a 34.1 mm chin-to-crown head height,
+  a 3.25 mm top margin and a centred facial axis.
+- **Clean cut-out.** BiRefNet matting keeps individual hair strands, and foreground colour estimation
+  stops halos, onto a background that is exactly `#FFFFFF`.
+- **Non-destructive correction.** White balance, exposure and left/right lighting balance are smooth
+  multiplicative fields, so pores, moles and scars stay exactly as photographed.
+- **Verified, not assumed.** Head height, margins, centring, roll, background, pose, expression, DPI
+  metadata, colour profile and file size are re-measured on the saved JPEG.
+- **Studio relighting**, three ways:
+  - `virtual-studio`: physically based virtual softboxes (clamshell, high-key, loop) applied to 3D face
+    geometry. No generative model, no generated pixel.
+  - `studio-ai` (IC-Light) and `studio-flux` (FLUX.2 [klein] 4B): diffusion models used only as a
+    lighting source. Their render is registered to the real face, only the smooth lighting field is
+    transferred, and the render is discarded.
+- **Identity-drift audit.** ArcFace cosine similarity of every output to its source, calibrated
+  against the natural variation between your own photos.
+- **Edge fill.** When a shoulder is cut by the frame, only the missing strip of clothing is
+  generated, guided by your best-framed shot from the same session. Official output is never filled.
+- **Print manager.** A local GUI to pick photos (any mix) and build 10 × 15 cm or 4 × 6 in sheets.
+- **Runs on an 8 GB laptop GPU.** Each model runs in its own process, weights stream from disk,
+  diffusion weights are stored in FP8, and stages wait for free memory or skip themselves rather
+  than crash other apps.
 
-Requires Windows/Linux, Python 3.12 (uv installs it), and an NVIDIA GPU with ≥ 4 GB VRAM (tested on an
-RTX 5060 Laptop, Blackwell).
+## Modes
+
+| Mode | What changes | Intended use |
+|---|---|---|
+| `strict-gov` | geometry, background, smooth exposure / white balance / left-right balance | **official submission** |
+| `virtual-studio` | + physically computed softbox lighting | studio portraits (clamshell / high-key are ID-style) |
+| `studio-ai` | + lighting field from IC-Light (SD 1.5) | research, not for official use |
+| `studio-flux` | + lighting field from FLUX.2 [klein] 4B | research, not for official use |
+
+## Pipeline
+
+```mermaid
+flowchart LR
+    A[photos] --> B[analyze<br/>face mesh + roll]
+    B --> C[matting<br/>BiRefNet + crown + framing]
+    C --> D[strict<br/>photometry + QC]
+    D --> E[fill<br/>FLUX inpainting]
+    E --> F[virtual-studio]
+    E --> G[studio-ai<br/>IC-Light]
+    E --> H[studio-flux<br/>FLUX.2 klein]
+    D & F & G & H --> I[identity audit<br/>ArcFace]
+    I --> J[reports, sheets, GUI]
+```
+
+Each stage runs in its own process and resumes per photo from `output/.cache/`.
+[ARCHITECTURE.md](ARCHITECTURE.md) explains every design decision, model choice and measurement.
+
+## Requirements
+
+- Windows 10/11 or Linux, Python 3.12 (installed by [uv](https://docs.astral.sh/uv/))
+- NVIDIA GPU with ≥ 6 GB VRAM and a recent driver (tested on an RTX 5060 Laptop GPU, 8 GB, Blackwell)
+- ~3 GB of disk for the core models, ~19 GB with FLUX.2 [klein]
+- For `studio-flux` and edge fill: ~9 GB of free system memory (RAM + page file)
+
+## Quick start
 
 ```bash
+git clone https://github.com/olekkut/govkadr.git
+cd govkadr
 uv sync
-uv run govkadr fetch-models
+uv run govkadr fetch-models          # add --flux for FLUX.2 [klein] (~16 GB)
+uv run govkadr run --input path/to/photos --output output
+uv run govkadr gui                   # pick photos and build a print sheet
 ```
 
-`fetch-models` downloads ~2.6 GB of pinned weights into `models/` (MediaPipe, BiRefNet, InsightFace,
-IC-Light, Realistic Vision 5.1). Add `--flux` for FLUX.2 [klein] 4B (~16 GB more).
+Useful options for `govkadr run`:
 
-## Run
-
-```bash
-uv run govkadr run --input photos-from-camera --output output
-```
-
-Options: `--mode all|strict-gov|virtual-studio|studio-ai|studio-flux` (default `all`),
-`--preset clamshell|high-key|loop` (virtual-studio), `--only <name fragments>`, `--limit N`,
-`--from-stage <stage>` / `--stages <stage ...>` (re-run part of the pipeline from cache),
-`--allow-low-memory` (run generative stages even with little free memory).
-Stages: analyze, matting, strict, fill, virtual, studio, studio-finish, flux, flux-finish, identity.
-
-## Print manager (GUI)
-
-```bash
-uv run govkadr gui
-```
-
-Opens a local page (http://127.0.0.1:8765, never exposed to the network) showing every photo in every
-mode with its verdict, head height and identity score. Pick photos with **+1 to sheet** or **Fill
-sheet ×8**, mix photos and modes freely, choose 4×6 in or 150×100 mm paper, and **Create print
-sheet** writes a 600 dpi sheet with crop marks to `output/prints/` (plus a JSON list of its tiles).
-
-## Missing image edges
-
-When the 35×45 crop runs past the original photo (a shoulder cut by the frame), the cut-out
-silhouette is continued straight out. The `fill` stage then generates only that missing strip of
-clothing with FLUX.2 [klein] inpainting. It uses the best-framed shot from the same session as a
-reference, so the same jacket, shirt and tie continue, and it never touches the face. The
-virtual-studio, studio-ai and studio-flux photos use the filled version; strict-gov never does, since
-gov.pl forbids altering the photo, and keeps a `source_coverage` warning instead. Better still,
-leave room below the shoulders when shooting.
+| Option | Effect |
+|---|---|
+| `--mode all\|strict-gov\|virtual-studio\|studio-ai\|studio-flux` | which outputs to produce (default `all`) |
+| `--preset clamshell\|high-key\|loop` | virtual-studio light setup |
+| `--only <name fragments>` / `--limit N` | process a subset |
+| `--from-stage <stage>` / `--stages <stage ...>` | re-run part of the pipeline, reusing the cache |
+| `--allow-low-memory` | run the generative stages even when free memory is short |
 
 ## Outputs
 
 ```
 output/
-  index.html              gallery of every result
-  summary.md / .json      one row per photo, plus the identity baseline
+  index.html, summary.md, summary.json      gallery and one row per photo
+  prints/                                   sheets built in the GUI
   <photo>/
-    report.json           every measurement, check, correction and model setting
+    report.json                             every measurement, check and model setting
     strict-gov/
-      <photo>_strict-gov_35x45mm_600dpi.jpg   826 x 1062 px, 600 dpi, sRGB  <- submit / print this
-      <photo>_strict-gov_sheet_10x15cm.jpg    150 x 100 mm sheet, 8 copies, crop marks
-      <photo>_strict-gov_sheet_4x6in.jpg      152.4 x 101.6 mm (4x6") sheet, 8 copies
-      <photo>_strict-gov_diagnostic.jpg       annotated mesh / axes / compliance zone + checklist
-    virtual-studio/
-      ... same set, plus
-      <photo>_virtual-studio_presets.jpg      strict-gov | clamshell | high-key | loop | surface normals
-    studio-ai/, studio-flux/
-      ... same set, plus
-      <photo>_<mode>_comparison.jpg           strict-gov | relit | lighting field applied
+      <photo>_strict-gov_35x45mm_600dpi.jpg  826 x 1062 px, 600 dpi, sRGB  <- submit / print this
+      <photo>_strict-gov_sheet_10x15cm.jpg   150 x 100 mm, 8 copies, crop marks
+      <photo>_strict-gov_sheet_4x6in.jpg     4 x 6 in (most "10x15" kiosks), 8 copies
+      <photo>_strict-gov_diagnostic.jpg      mesh, axes, compliance zone, checklist
+    virtual-studio/   ... + _presets.jpg (all three light setups)
+    studio-ai/, studio-flux/   ... + _comparison.jpg (before | after | lighting field)
 ```
 
-**Printing:** most "10 × 15" kiosks use 4 × 6 in paper. Print `sheet_4x6in` there (or `sheet_10x15cm`
-on true 150 × 100 mm paper) with "no cropping / original size" and cut along the grey marks.
+**Printing:** most "10 × 15" photo kiosks actually use 4 × 6 in paper. Print `sheet_4x6in` there
+(or `sheet_10x15cm` on true 150 × 100 mm paper) at 100 % / "no cropping", and cut along the grey marks.
 
 ## Taking a good source photo
 
-The best results in the test set came from the 5× telephoto lens at 1.5–2 m: no perspective distortion
-and an even pose. Use a plain wall, light from the front (a window behind the camera), a level camera at
-eye height, and leave space above the hair and below the shoulders.
+- Use a telephoto lens (2–5× on a phone) from 1.5–2 m: wide-angle close-ups distort the nose and jaw.
+- Plain wall, soft light from the front (a window behind the photographer), camera level with the eyes.
+- Leave space above the hair and below the shoulders.
+
+## Privacy
+
+Everything runs locally. Photos, outputs and model weights are git-ignored, and the GUI listens on
+127.0.0.1 only. Output JPEGs carry no camera or GPS metadata.
+
+## Development
+
+```bash
+uv sync --group dev
+uv run pytest
+uv run ruff check . && uv run ruff format --check .
+```
+
+The unit tests need no GPU or model weights; CI runs them on every push.
+
+## Licence and disclaimer
+
+The code is [MIT-licensed](LICENSE). The downloaded models have their own licences, including a
+non-commercial restriction on the InsightFace models used by the identity audit. See
+[THIRD_PARTY_MODELS.md](THIRD_PARTY_MODELS.md).
+
+govkadr checks photos against published requirements, but the issuing office makes the final
+decision. Only `strict-gov` output is intended for official applications.

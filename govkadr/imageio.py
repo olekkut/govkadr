@@ -95,8 +95,6 @@ def inspect_output(path: Path) -> dict:
             "jfif_dpi": [round(float(v), 2) for v in jfif_dpi] if jfif_dpi else None,
             "exif_dpi": [float(exif[_EXIF_X_RES]), float(exif[_EXIF_Y_RES])] if _EXIF_X_RES in exif else None,
             "exif_resolution_unit": exif.get(_EXIF_RES_UNIT),
-            "icc_profile": ImageCms.getProfileDescription(ImageCms.ImageCmsProfile(io.BytesIO(icc))).strip()
-            if icc
-            else None,
+            "icc_profile": ImageCms.getProfileDescription(ImageCms.ImageCmsProfile(io.BytesIO(icc))).strip() if icc else None,
             "has_gps": 0x8825 in exif,
         }

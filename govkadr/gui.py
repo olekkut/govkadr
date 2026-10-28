@@ -49,14 +49,16 @@ def _catalog(input_dir: Path, out_dir: Path) -> list[dict]:
                 "cos": ident.get(f"cosine_source_vs_{mode.replace('-', '_')}"),
             }
         src = job.report.get("source", {})
-        items.append({
-            "stem": job.stem,
-            "session": job.stem[4:12],
-            "time": f"{job.stem[13:15]}:{job.stem[15:17]}:{job.stem[17:19]}",
-            "focal": src.get("focal_35mm"),
-            "edge_fill_mm2": fill_info.get("area_mm2_on_print") if fill_info.get("applied") else None,
-            "modes": modes,
-        })
+        items.append(
+            {
+                "stem": job.stem,
+                "session": job.stem[4:12],
+                "time": f"{job.stem[13:15]}:{job.stem[15:17]}:{job.stem[17:19]}",
+                "focal": src.get("focal_35mm"),
+                "edge_fill_mm2": fill_info.get("area_mm2_on_print") if fill_info.get("applied") else None,
+                "modes": modes,
+            }
+        )
     return items
 
 

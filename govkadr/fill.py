@@ -9,6 +9,8 @@ and studio-flux use the filled subject.
 
 from __future__ import annotations
 
+import re
+
 import cv2
 import numpy as np
 
@@ -32,15 +34,30 @@ def fill_mask(alpha: np.ndarray, coverage: np.ndarray, pts: np.ndarray) -> np.nd
     return mask & ~face
 
 
+def _session_and_time(stem: str) -> tuple[str, int]:
+    """(session, seconds of day) from camera names like PXL_20261027_115316389; ('', 0) otherwise."""
+    m = re.search(r"(\d{8})_(\d{2})(\d{2})(\d{2})", stem)
+    if not m:
+        return "", 0
+    return m.group(1), int(m.group(2)) * 3600 + int(m.group(3)) * 60 + int(m.group(4))
+
+
 def pick_reference(job, candidates) -> object | None:
-    """Best-framed other photo from the same session (same date), nearest in capture time."""
-    session = job.stem[:12]  # PXL_YYYYMMDD
+    """Best-framed other photo from the same session (same date), nearest in capture time.
+
+    Photos whose names carry no date are treated as one session.
+    """
+    session, t = _session_and_time(job.stem)
 
     def score(c):
         cov = c.report.get("strict-gov", {}).get("coverage", {})
-        return (cov.get("subject_rows_filled", 99) + cov.get("subject_cols_filled", 99), abs(int(c.stem[13:19] or 0) - int(job.stem[13:19] or 0)))
+        return (cov.get("subject_rows_filled", 99) + cov.get("subject_cols_filled", 99), abs(_session_and_time(c.stem)[1] - t))
 
-    pool = [c for c in candidates if c is not job and c.stem[:12] == session and c.report.get("strict-gov", {}).get("verdict") in ("PASS", "PASS_WITH_WARNINGS")]
+    pool = [
+        c
+        for c in candidates
+        if c is not job and _session_and_time(c.stem)[0] == session and c.report.get("strict-gov", {}).get("verdict") in ("PASS", "PASS_WITH_WARNINGS")
+    ]
     pool = [c for c in pool if c.report["strict-gov"].get("coverage", {}).get("subject_rows_filled", 99) == 0]
     return min(pool, key=score) if pool else None
 

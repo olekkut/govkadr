@@ -90,11 +90,21 @@ def _write_gallery(jobs: list[Job], rows: list[dict], out_dir: Path, baseline: d
             cls = {"PASS": "ok", "PASS_WITH_WARNINGS": "warn", "FAIL": "bad", "ERROR": "bad", "SKIPPED": "na"}.get(v or "", "na")
             return f'<span class="b {cls}">{html.escape((v or "n/a").replace("_", " "))}</span>'
 
-        links = " · ".join(f'<a href="{_rel(p, out_dir)}">{n}</a>' for n, p in (("A diagnostic", a.get("diagnostic")), ("A sheet 10x15", a.get("sheet_10x15cm")), ("B diagnostic", b.get("diagnostic")), ("B comparison", b.get("comparison")), ("report.json", str(job.out / "report.json"))) if p)
+        links = " · ".join(
+            f'<a href="{_rel(p, out_dir)}">{n}</a>'
+            for n, p in (
+                ("A diagnostic", a.get("diagnostic")),
+                ("A sheet 10x15", a.get("sheet_10x15cm")),
+                ("B diagnostic", b.get("diagnostic")),
+                ("B comparison", b.get("comparison")),
+                ("report.json", str(job.out / "report.json")),
+            )
+            if p
+        )
         cards.append(
-            f'<section><h2>{html.escape(r["photo"])}</h2><p>strict-gov {badge(r["strict_gov_verdict"])} studio-ai {badge(r["studio_ai_verdict"])} '
-            f'head {r["head_height_mm"]} mm · offset {r["horizontal_offset_mm"]} mm · rotation {r["rotation_applied_deg_ccw"]}° · '
-            f'cos(src,A) {r["cos_source_strict"]} · cos(src,B) {r["cos_source_studio"]}</p>'
+            f"<section><h2>{html.escape(r['photo'])}</h2><p>strict-gov {badge(r['strict_gov_verdict'])} studio-ai {badge(r['studio_ai_verdict'])} "
+            f"head {r['head_height_mm']} mm · offset {r['horizontal_offset_mm']} mm · rotation {r['rotation_applied_deg_ccw']}° · "
+            f"cos(src,A) {r['cos_source_strict']} · cos(src,B) {r['cos_source_studio']}</p>"
             f'<div class="row">{img(a.get("photo"), "strict-gov")}{img(job.report.get("virtual-studio", {}).get("files", {}).get("photo"), "virtual-studio")}{img(b.get("photo"), "studio-ai")}{img(job.report.get("studio-flux", {}).get("files", {}).get("photo"), "studio-flux")}</div>'
             f"<p class=links>{links}</p></section>"
         )

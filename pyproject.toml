@@ -1,9 +1,24 @@
 [project]
 name = "govkadr"
 version = "0.1.0"
-description = "Biometric 35x45 mm ID/passport photo pipeline (gov.pl + ICAO 9303) with a deterministic and an experimental generative mode"
+description = "Local pipeline that turns phone portraits into compliant 35x45 mm Polish ID/passport photos (gov.pl, ICAO 9303), with studio relighting modes and an identity-drift audit"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Aleksander Kutycki" }]
 requires-python = ">=3.12,<3.13"
+keywords = ["biometric", "passport-photo", "id-photo", "icao", "matting", "relighting", "computer-vision"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: GPU :: NVIDIA CUDA",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
 dependencies = [
     "numpy>=2.0",
     "scipy>=1.14",
@@ -19,11 +34,19 @@ dependencies = [
     "timm>=1.0",
     "kornia>=0.7",
     "einops>=0.8",
-    "diffusers>=0.32",
+    "diffusers>=0.37",  # Flux2KleinPipeline / Flux2KleinInpaintPipeline
     "accelerate>=1.0",
     "safetensors>=0.4",
     "huggingface-hub>=0.26",
+    "psutil>=5.9",
 ]
+
+[project.urls]
+Repository = "https://github.com/olekkut/govkadr"
+Issues = "https://github.com/olekkut/govkadr/issues"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.8"]
 
 [project.scripts]
 govkadr = "govkadr.cli:main"
@@ -43,3 +66,14 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["govkadr"]
+
+[tool.ruff]
+line-length = 160
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501", "B008", "B905"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

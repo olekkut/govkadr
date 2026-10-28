@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uvx ruff check .
+      - run: uvx ruff format --check .
+
+  test:
+    # Unit tests cover the geometry, photometry, sheets, fill logic, job state and the GUI server.
+    # They need no GPU and no model weights, so CI installs only the light dependencies
+    # (the full project pins a CUDA build of torch).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: System libraries for OpenCV / MediaPipe
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1 libglib2.0-0
+      - name: Test environment
+        run: |
+          uv venv --python 3.12
+          uv pip install numpy scipy pillow opencv-contrib-python mediapipe onnxruntime pytest
+      - name: pytest
+        run: PYTHONPATH=. uv run --no-project pytest -q

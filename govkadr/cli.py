@@ -122,7 +122,14 @@ def _run(args: argparse.Namespace) -> int:
     jobs = [j.load() for j in _jobs(args)]
     baseline_file = args.output / ".cache" / "identity_baseline.json"
     baseline = json.loads(baseline_file.read_text(encoding="utf-8")) if baseline_file.exists() else {}
-    run_info = {"started": started, "photos": len(jobs), "mode": args.mode, "stages": stages, "seconds": round(time.perf_counter() - t0, 1), "stage_seconds": timings}
+    run_info = {
+        "started": started,
+        "photos": len(jobs),
+        "mode": args.mode,
+        "stages": stages,
+        "seconds": round(time.perf_counter() - t0, 1),
+        "stage_seconds": timings,
+    }
     # The summary and gallery always cover every processed photo, even after an --only re-run.
     from .jobs import make_jobs
 

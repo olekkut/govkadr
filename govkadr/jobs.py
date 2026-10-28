@@ -76,7 +76,7 @@ class Job:
         self.cache.mkdir(parents=True, exist_ok=True)
         (self.cache / "failed.txt").write_text(msg, encoding="utf-8")
 
-    def load(self) -> "Job":
+    def load(self) -> Job:
         self.report = {}
         for f in sorted(self.cache.glob("report.*.json")):
             self.report[f.stem.split(".", 1)[1]] = json.loads(f.read_text(encoding="utf-8"))

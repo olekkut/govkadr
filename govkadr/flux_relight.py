@@ -144,7 +144,9 @@ class FluxFiller:
         torch.cuda.empty_cache()
 
     @torch.inference_mode()
-    def fill(self, image: np.ndarray, mask: np.ndarray, reference: np.ndarray | None, size: tuple[int, int] = (768, 992), steps: int = 4) -> tuple[np.ndarray, dict]:
+    def fill(
+        self, image: np.ndarray, mask: np.ndarray, reference: np.ndarray | None, size: tuple[int, int] = (768, 992), steps: int = 4
+    ) -> tuple[np.ndarray, dict]:
         w, h = size
         t0 = time.perf_counter()
         torch.cuda.reset_peak_memory_stats()

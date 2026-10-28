@@ -80,6 +80,7 @@ class StudioRelighter:
     def __init__(self, device: str = "cuda", seed: int = 20261027, fp8_weights: bool = True):
         from accelerate import init_empty_weights
         from diffusers import AutoencoderKL, DPMSolverMultistepScheduler, UNet2DConditionModel
+
         self.device = torch.device(device)
         self.seed = seed
         base = weights.fetch_hf(weights.SD15_REALISTIC_VISION)
@@ -167,7 +168,9 @@ class StudioRelighter:
         return lat
 
     @torch.inference_mode()
-    def relight(self, subject_on_grey: np.ndarray, size: tuple[int, int] = (512, 656), steps: int = 25, cfg: float = 2.0, denoise: float = 0.9) -> tuple[np.ndarray, dict]:
+    def relight(
+        self, subject_on_grey: np.ndarray, size: tuple[int, int] = (512, 656), steps: int = 25, cfg: float = 2.0, denoise: float = 0.9
+    ) -> tuple[np.ndarray, dict]:
         """Relit render of a subject composited on 50 % grey (IC-Light's input convention)."""
         w, h = size
         t0 = time.perf_counter()
@@ -205,7 +208,9 @@ def register_render(render: np.ndarray, render_pts: np.ndarray, ref_pts: np.ndar
     ids = np.r_[0:468:3, 468, 473]
     src = ref_pts[ids]
     disp = render_pts[ids] - src
-    border = np.array([[x, y] for x in np.linspace(0, w - 1, 6) for y in (0, h - 1)] + [[x, y] for y in np.linspace(0, h - 1, 7)[1:-1] for x in (0, w - 1)], float)
+    border = np.array(
+        [[x, y] for x in np.linspace(0, w - 1, 6) for y in (0, h - 1)] + [[x, y] for y in np.linspace(0, h - 1, 7)[1:-1] for x in (0, w - 1)], float
+    )
     src = np.vstack([src, border])
     disp = np.vstack([disp, np.zeros_like(border)])
     rbf = RBFInterpolator(src, disp, kernel="thin_plate_spline", smoothing=1.0)

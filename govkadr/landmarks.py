@@ -25,8 +25,42 @@ CHIN = 152
 # Landmarks on the facial mid-sagittal line: nasion, nose bridge, philtrum, lips, chin.
 MIDLINE = (9, 8, 168, 6, 197, 195, 5, 4, 1, 2, 164, 0, 11, 12, 13, 14, 15, 16, 17, 18, 200, 199, 175, 152)
 FACE_OVAL = (
-    10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377,
-    152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109,
+    10,
+    338,
+    297,
+    332,
+    284,
+    251,
+    389,
+    356,
+    454,
+    323,
+    361,
+    288,
+    397,
+    365,
+    379,
+    378,
+    400,
+    377,
+    152,
+    148,
+    176,
+    149,
+    150,
+    136,
+    172,
+    58,
+    132,
+    93,
+    234,
+    127,
+    162,
+    21,
+    54,
+    103,
+    67,
+    109,
 )
 EYE_A = (33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246)
 EYE_B = (263, 249, 390, 373, 374, 380, 381, 382, 362, 398, 384, 385, 386, 387, 388, 466)
@@ -67,6 +101,7 @@ def iris_centres(pts: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     Each centre averages the network's centre point with the centroid of the four limbus points,
     which halves the jitter of either estimate on its own.
     """
+
     def centre(ids):
         return 0.5 * pts[ids[0], :2] + 0.5 * pts[list(ids[1:]), :2].mean(axis=0)
 
@@ -132,12 +167,7 @@ class FaceAnalyzer:
         left, right = iris_centres(pts)
         mid = 0.5 * (left + right)
         s = zoom * crop_px / (6.0 * float(np.linalg.norm(right - left)))
-        m = (
-            g.translate(crop_px / 2 - 0.5, crop_px * 0.45 - 0.5)
-            @ g.scale(s)
-            @ g.rotate(-(angle + extra_rot))
-            @ g.translate(-mid[0], -mid[1])
-        )
+        m = g.translate(crop_px / 2 - 0.5, crop_px * 0.45 - 0.5) @ g.scale(s) @ g.rotate(-(angle + extra_rot)) @ g.translate(-mid[0], -mid[1])
         found = self.detect(g.warp(img, m, (crop_px, crop_px), interp=cv2.INTER_CUBIC))
         if not found:
             return None
