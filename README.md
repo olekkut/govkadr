@@ -9,6 +9,11 @@
 (gov.pl *Zdjęcie do dowodu lub paszportu*, ICAO Doc 9303), fully locally, with every requirement
 re-measured on the delivered file.
 
+![govkadr diagnostic sheet: the source photo with detected tilt and crop, the finished 35x45 mm photo with face mesh, levelled eye line and the 31.5-36 mm head-height zone, and the compliance checklist](docs/images/diagnostic_strict-gov.jpg)
+<sub>Every photo gets a diagnostic sheet: the detected tilt and crop on the source (left), the finished
+35 × 45 mm photo with face mesh, levelled eye line, crown-to-chin box and head-height zone (middle), and
+every check re-measured on the saved file (right). The example is an AI-edited portrait.</sub>
+
 govkadr is a command-line pipeline plus a small local GUI. Point it at a folder of photos and it produces,
 for each one, a print-ready 826 × 1062 px / 600 dpi photo, kiosk print sheets with crop marks, an annotated
 diagnostic sheet and a JSON compliance report. Optional studio modes relight the photo, and an identity
@@ -65,12 +70,10 @@ from the original face:
 
 ### Diagnostic sheet
 
-Every output comes with an annotated sheet like a commercial biometric scanner's: the detected tilt
-and crop on the source (left); the 478-point mesh, iris fits, levelled eye line, crown-to-chin box,
-the 31.5–36 mm compliance zone and the centring axis (middle); and every check re-measured on the
-saved file (right).
-
-![strict-gov diagnostic sheet](docs/images/diagnostic_strict-gov.jpg)
+Every output comes with an annotated sheet like a commercial biometric scanner's (the strict-gov
+one is shown at the top of this page): the detected tilt and crop on the source; the 478-point mesh,
+iris fits, levelled eye line, crown-to-chin box, the 31.5–36 mm compliance zone and the centring axis;
+and every check re-measured on the saved file. The relighting modes get the same sheet:
 
 <details>
 <summary>studio-flux diagnostic sheet</summary>
