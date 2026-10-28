@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+from .fill import _session_and_time
 from .jobs import make_jobs
 
 MODES = ("strict-gov", "virtual-studio", "studio-ai", "studio-flux")
@@ -49,11 +50,12 @@ def _catalog(input_dir: Path, out_dir: Path) -> list[dict]:
                 "cos": ident.get(f"cosine_source_vs_{mode.replace('-', '_')}"),
             }
         src = job.report.get("source", {})
+        session, secs = _session_and_time(job.stem)
         items.append(
             {
                 "stem": job.stem,
-                "session": job.stem[4:12],
-                "time": f"{job.stem[13:15]}:{job.stem[15:17]}:{job.stem[17:19]}",
+                "session": f"{session[:4]}-{session[4:6]}-{session[6:]}" if session else "",
+                "time": f"{secs // 3600:02d}:{secs // 60 % 60:02d}:{secs % 60:02d}" if session else "",
                 "focal": src.get("focal_35mm"),
                 "edge_fill_mm2": fill_info.get("area_mm2_on_print") if fill_info.get("applied") else None,
                 "modes": modes,
@@ -191,7 +193,11 @@ let photos=[], tiles=[];
 const $=s=>document.querySelector(s);
 function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 async function load(){photos=await (await fetch("/api/photos")).json();
-  const ss=[...new Set(photos.map(p=>p.session))];ss.forEach(s=>$("#session").insertAdjacentHTML("beforeend",`<option>${s}</option>`));render();renderSheet();}
+  const ss=[...new Set(photos.map(p=>p.session))];ss.forEach(s=>$("#session").insertAdjacentHTML("beforeend",`<option value="${s}">${s||"no date"}</option>`));render();
+  if(new URLSearchParams(location.search).has("demo")) demo(); renderSheet();}
+// ?demo=1 (used for the README screenshot): cards in different modes and a partly filled sheet.
+function demo(){const ms=["studio-flux","virtual-studio","strict-gov"];photos.forEach((p,i)=>{if(p.modes[ms[i%3]]) p.cur=ms[i%3]});
+  tiles=[];photos.forEach(p=>{for(let i=0;i<2;i++) tiles.push({url:p.modes[p.cur].url,stem:p.stem,mode:p.cur})});render();}
 function render(){const sess=$("#session").value, ok=$("#okonly").checked; $("#grid").innerHTML="";
   for(const p of photos){ if(sess&&p.session!==sess) continue;
     const modes=Object.keys(p.modes); if(!modes.length) continue; p.cur=p.cur&&p.modes[p.cur]?p.cur:modes[0];
@@ -199,8 +205,8 @@ function render(){const sess=$("#session").value, ok=$("#okonly").checked; $("#g
     const el=document.createElement("div"); el.className="card";
     el.innerHTML=`<img loading="lazy" src="${m.url}" alt="${esc(p.stem)}">
       <div class="tabs">${modes.map(k=>`<button data-m="${k}" class="${k===p.cur?"on":""}">${LABEL[k]}</button>`).join("")}</div>
-      <div><span class="b ${m.verdict}">${esc((m.verdict||"").replaceAll("_"," "))}</span> <b>${esc(p.stem.slice(4))}</b></div>
-      <div class="meta">${p.session} ${p.time} · ${p.focal||"?"} mm · head ${m.head_mm??"-"} mm · id ${m.cos??"-"}</div>
+      <div><span class="b ${m.verdict}">${esc((m.verdict||"").replaceAll("_"," "))}</span> <b>${esc(p.stem)}</b></div>
+      <div class="meta">${[p.session&&`${p.session} ${p.time}`, p.focal&&`${p.focal} mm lens`, `head ${m.head_mm??"-"} mm`, `id ${m.cos??"-"}`].filter(Boolean).join(" · ")}</div>
       ${m.warnings.length?`<div class="meta">⚠ ${esc(m.warnings.join(", "))}</div>`:""}
       ${p.edge_fill_mm2&&p.cur!=="strict-gov"?`<div class="meta">edge fill: ${p.edge_fill_mm2} mm² generated</div>`:""}
       <div class="row"><button data-a="1">+1 to sheet</button><button data-a="8">Fill sheet ×8</button></div>

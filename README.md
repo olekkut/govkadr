@@ -41,6 +41,70 @@ audit measures how much each mode changed the face.
   diffusion weights are stored in FP8, and stages wait for free memory or skip themselves rather
   than crash other apps.
 
+## How it works, by example
+
+The example inputs in [`examples/input`](examples/input) are AI-edited portraits (the author's photos
+restyled as Gordon Freeman, Geralt of Rivia and V). They include glasses, grey hair with a scar, and a
+cluttered bathroom background.
+
+### Every mode, side by side
+
+![Source and the four output modes for three examples](docs/images/modes_comparison.jpg)
+
+All twelve photos pass the compliance checks: head height 34.1–34.2 mm, axis offset ≤ 0.01 mm,
+background exactly white. V's shower, tiles and shelf are removed entirely.
+
+Identity similarity to the source (ArcFace cosine, 1.0 = identical) shows how far each mode moves away
+from the original face:
+
+| | strict-gov | virtual-studio | studio-flux | studio-ai |
+|---|---|---|---|---|
+| Freeman | 0.981 | 0.958 | 0.916 | 0.938 |
+| Geralt | 0.987 | 0.961 | 0.962 | 0.929 |
+| V | 0.989 | 0.944 | 0.933 | 0.919 |
+
+### Diagnostic sheet
+
+Every output comes with an annotated sheet like a commercial biometric scanner's: the detected tilt
+and crop on the source (left); the 478-point mesh, iris fits, levelled eye line, crown-to-chin box,
+the 31.5–36 mm compliance zone and the centring axis (middle); and every check re-measured on the
+saved file (right).
+
+![strict-gov diagnostic sheet](docs/images/diagnostic_strict-gov.jpg)
+
+<details>
+<summary>studio-flux diagnostic sheet</summary>
+
+![studio-flux diagnostic sheet](docs/images/diagnostic_studio-flux.jpg)
+
+</details>
+
+### Relighting modes
+
+**virtual-studio**: physically based light on 3D face geometry, with no generative model. From left:
+strict-gov input, the three light setups, and the surface normals they are computed on.
+
+![virtual-studio presets](docs/images/virtual-studio_presets.jpg)
+
+**studio-flux** and **studio-ai**: a diffusion model relights the photo, but only its smooth lighting
+field (right) is applied to the real photo, so skin texture, scars and stubble stay the camera's.
+
+![studio-flux comparison](docs/images/studio-flux_comparison.jpg)
+![studio-ai comparison](docs/images/studio-ai_comparison.jpg)
+
+### Print sheet and print manager
+
+Each photo also comes as a 10 × 15 cm (and 4 × 6 in) sheet of 8 with crop marks:
+
+![10x15 cm print sheet](docs/images/sheet_10x15cm.jpg)
+
+`govkadr gui` lets you mix any photos and modes on one sheet:
+
+![print manager GUI](docs/images/gui.jpg)
+
+Regenerate these figures with `uv run python scripts/make_readme_figures.py` after running the
+pipeline on `examples/input` into `output-examples`.
+
 ## Modes
 
 | Mode | What changes | Intended use |
